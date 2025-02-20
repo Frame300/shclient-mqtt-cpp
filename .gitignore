@@ -1,2 +1,2 @@
 /build
-*.conf
+src/config/shc-mqtt.conf
