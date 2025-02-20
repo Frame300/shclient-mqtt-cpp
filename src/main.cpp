@@ -62,7 +62,7 @@ int main(int argc, char *argv[])
         }
         else
         {
-            printf("Connamd\tDescription\nq, quit\tExit\nh, help\tPrint this message\n");
+            printf("Command\t|\tDescription\nq, quit\t|\tExit\nh, help\t|\tPrint this message\n");
         }
     }
 
