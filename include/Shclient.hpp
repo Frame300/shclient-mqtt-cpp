@@ -19,13 +19,13 @@
 #include <ctime>
 #include <openssl/evp.h>
 #include <openssl/rand.h>
+#include <sys/select.h>
 
-
+// Класс для взаимодействия с сервером МимиСмарт (2.0)
 class Shclient
 {
 private:
-    static const ssize_t RESPONSE_BUFFER_SIZE = 1024;
-    static const ssize_t AUTHORIZATION_DATA_SIZE = 16;   // AES128 Check
+    static const ssize_t AUTHORIZATION_DATA_SIZE = 16;   // Размер ключа AES128 всегда 16 байт
     static const uint32_t PD_REQUEST_ALL_DEVICES = 14;   // Request all devices. If we use with id module - this module returned first
     static const uint32_t PD_SET_STATUS_FROM_SERVER = 7; // State of single item from server
     static const uint32_t PD_SET_STATUS_TO_SERVER = 5;   // Set state to server
@@ -44,7 +44,7 @@ private:
     std::map<std::string, std::map<std::string, std::string>> Items;
     std::vector<std::function<void(Shclient&, std::string, std::string)>> handlers;
     std::thread listener_thread;
-    bool listener_running = true;
+    bool listener_running;
 
 
     void sendDataToHandlers(std::string item, std::string state)
@@ -376,6 +376,8 @@ public:
         close_connection();
     }
 
+    // Инициализация
+    // подключение к серверу, авторизация по ключу, получение логики
     int init()
     {
         if (connect_to_srv() && authorization() && read_xml_logic())
@@ -384,6 +386,8 @@ public:
             return false;
     }
 
+    // Закрывае соединение с сервером
+    // Убивает поток приема событий, если он запущен
     void close_connection()
     {
         listener_running = false;
@@ -394,6 +398,7 @@ public:
         close(connectionResource);
     }
 
+    // Запрос состояния всех устройств
     void requestAllDevicesState()
     {
         std::string data = {0, 0, PD_REQUEST_ALL_DEVICES, 0, 0, 0, 0};
@@ -403,6 +408,10 @@ public:
     void readDeviceStateEvent()
     {
         time_t check_loop = time(0);
+        SetSocketBlocking(connectionResource, false);
+        fd_set read_fd;
+        FD_ZERO(&read_fd);
+
         while (listener_running)
         {
         if (time(0) - check_loop > 60)
@@ -416,6 +425,12 @@ public:
             reconnect();
             return;
         }
+
+        FD_SET(connectionResource, &read_fd);
+        struct timeval timeout{.tv_sec = 1, .tv_usec = 0};
+        int act = select(connectionResource + 1, &read_fd, nullptr, nullptr, &timeout);
+        if (act < 1 && !FD_ISSET(connectionResource, &read_fd)) continue;
+
         std::string data = fread(10);
         u_int32_t length;
         u_int8_t shHead[6];
@@ -581,7 +596,7 @@ public:
                                 logger.log(DEBUG, IdSid + " " + Items[IdSid]["type"] + " Value: " + std::string(s_data));
                             }
                         }
-                        // std::this_thread::sleep_for(std::chrono::milliseconds(1));
+                        std::this_thread::sleep_for(std::chrono::milliseconds(5));
                     }
                     sendDataToHandlers(IdSid, tmpdata);
                 }
@@ -597,14 +612,21 @@ public:
                 std::cout << std::endl;
             }
         }
-    // std::this_thread::sleep_for(std::chrono::milliseconds(10));
+    std::this_thread::sleep_for(std::chrono::milliseconds(10));
     }
     }
 
+    // Старт прослушивания событий от сервера
     void startLister() {
+        listener_running = true;
         listener_thread = std::thread(&Shclient::readDeviceStateEvent, this);
     }
 
+    // Метод для вызова пользовательских функций
+    // На вход функция должа принимать (&Shclient, string, string):
+    //     ссылка на объект: &Shclient
+    //     адрес устройства: "ID:SID"
+    //     полученный статус: <8и битный массив>
     void registerHandler(auto &func)
     {
         handlers.emplace_back(std::bind(func, std::placeholders::_1, std::placeholders::_2, std::placeholders::_3));

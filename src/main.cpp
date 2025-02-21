@@ -1,9 +1,13 @@
 #include "Shclient.hpp"
 #include <nlohmann/json.hpp>
+#include <termios.h>
 
 using namespace std;
 using json = nlohmann::json;
 
+constexpr int ENTER_KEY_CODE = 10;
+constexpr int BACKSPACE_KEY_CODE = 127;
+std::string input_buffer;
 bool loop = true;
 
 void p_exit(int s)
@@ -12,22 +16,60 @@ void p_exit(int s)
     loop = false;
 }
 
+char getChar()
+{
+    struct termios oldt, newt;
+    char ch;
+    tcgetattr(STDIN_FILENO, &oldt); // Получаем текущие настройки терминала
+    newt = oldt;
+    newt.c_lflag &= ~(ICANON); // Выключаем канонический режим для перехвата всех нажатий до нажатия ENTER
+    tcsetattr(STDIN_FILENO, TCSANOW, &newt);
+
+    ch = getchar(); // Читаем один символ
+
+    tcsetattr(STDIN_FILENO, TCSANOW, &oldt); // Восстанавливаем настройки
+    return ch;
+}
+
 void test_out(Shclient &shs, string item, string state)
 {
     try
     {
-        std::stringstream mess;
-        mess <<  "От сервера принят статус устройства " << item.c_str() << ":\t";
-        for (u_char c_state : state) {
+        stringstream mess;
+
+        // Очищаем текущую строку ввода (Переводим "каретку" в начало, заполняем пробелами и снова переводим в начало)
+        cout << "\r" << string(input_buffer.length(), ' ') << "\r";
+
+        // Выводим номер и информацию устройства приславшего собитие
+        mess << "От сервера принят статус устройства " << item.c_str() << ":\t";
+        for (u_char c_state : state)
+        {
             mess << hex << (int)c_state << " ";
         }
         shs.logger.log(WARNING, mess.str());
-    }
-    catch(const std::exception& e)
-    {
-        std::cerr << e.what() << '\n';
-    }
 
+        // Восстанавливаем ввод пользователя
+        cout << "> " << input_buffer;
+        cout.flush();
+    }
+    catch (const exception &e)
+    {
+        cerr << e.what() << '\n';
+    }
+}
+
+void test_in(Shclient &shs, bool &main_loop)
+{
+    if (input_buffer == "quit" || input_buffer == "q")
+    {
+        main_loop = false;
+        shs.close_connection();
+    }
+    else
+    {
+        printf("\nCommand\t|\tDescription\nq, quit\t|\tExit\nh, help\t|\tPrint this message\n");
+    }
+    input_buffer.clear();
 }
 
 int main(int argc, char *argv[])
@@ -43,31 +85,33 @@ int main(int argc, char *argv[])
     ifstream f("shc-mqtt.conf");
     json data = json::parse(f);
 
-    Shclient shs(data["ip20"],
-                 data["port20"],
-                 data["key20"],
-                 INFO);
+    Shclient shs(data["ip20"], data["port20"], data["key20"], INFO);
 
     shs.init();
     shs.registerHandler(test_out);
     shs.requestAllDevicesState();
     shs.startLister();
 
-    std::string input;
-    while (true) {
-        std::cout << "> ";
-        std::getline(std::cin, input);
-        if (!loop || input == "quit" || input == "q") {
-            break;
-        }
-        else
+    while (loop)
+    {
+        char ch = getChar();
+        switch ((int)ch)
         {
-            printf("Command\t|\tDescription\nq, quit\t|\tExit\nh, help\t|\tPrint this message\n");
+        case ENTER_KEY_CODE:
+            test_in(shs, loop);
+            break;
+        case BACKSPACE_KEY_CODE:
+            if (input_buffer.length())
+            {
+                input_buffer.pop_back();
+                std::cout << "\b\b\b   \b\b\b";
+            }
+            break;
+        default:
+            input_buffer += ch;
         }
     }
 
-
-    shs.close_connection();
     cout << "End of " << argv[0] << endl;
     return 0;
 }
