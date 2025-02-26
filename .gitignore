@@ -1,2 +1,3 @@
 /build
 src/config/shc-mqtt.conf
+.vscode

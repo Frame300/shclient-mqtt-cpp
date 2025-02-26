@@ -2,6 +2,7 @@
 #include "Shclient.hpp"
 #include <nlohmann/json.hpp>
 #include <termios.h>
+#include <algorithm>
 
 using namespace std;
 using json = nlohmann::json;
@@ -73,8 +74,35 @@ void test_in(Shclient &shs, bool &main_loop)
     input_buffer.clear();
 }
 
+char* getCmdOption(char ** begin, char ** end, const string & option)
+{
+    char ** itr = find(begin, end, option);
+    if (itr != end && ++itr != end)
+    {
+        return *itr;
+    }
+    return 0;
+}
+
+bool cmdOptionExists(char** begin, char** end, const string& option)
+{
+    return find(begin, end, option) != end;
+}
+
 int main(int argc, char *argv[])
 {
+    if(cmdOptionExists(argv, argv+argc, "-h"))
+    {
+        cout << "-f <Путь к конфигурационному файлу>" << endl;
+    }
+    char * filename = getCmdOption(argv, argv + argc, "-f");
+    string configFilePath;
+    if (!filename)
+    {
+        cout << "Путь к конфигурационному файлу не указан. Использован файл по умолчанию." << endl;
+        configFilePath = string("/root/shc-mqtt.conf");
+    } else configFilePath = string(filename);
+
     struct sigaction sigIntHandler;
 
     sigIntHandler.sa_handler = p_exit;
@@ -83,7 +111,7 @@ int main(int argc, char *argv[])
 
     sigaction(SIGINT, &sigIntHandler, NULL);
 
-    ifstream f("shc-mqtt.conf");
+    ifstream f(configFilePath);
     json data = json::parse(f);
 
     Shclient shs(data["ip20"], data["port20"], data["key20"], INFO);
