@@ -1,3 +1,4 @@
+#include <sys/types.h>
 #include "Shclient.hpp"
 #include <nlohmann/json.hpp>
 #include <termios.h>
