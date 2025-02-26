@@ -1,0 +1,3 @@
+[submodule "include/rapidxml"]
+	path = include/rapidxml
+	url = https://github.com/dwd/rapidxml.git
