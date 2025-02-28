@@ -4,6 +4,7 @@
 #include <cstring>
 #include <cmath>
 #include <vector>
+#include <future>
 #include <thread>
 #include <fcntl.h>
 #include <sys/socket.h>
@@ -45,6 +46,7 @@ private:
     std::vector<std::function<void(Shclient&, std::string, std::string)>> handlers;
     std::thread listener_thread;
     bool listener_running;
+    fd_set read_fd;
 
 
     void sendDataToHandlers(std::string item, std::string state)
@@ -249,6 +251,7 @@ private:
 
     void sendToServer(std::string data)
     {
+        n = 0;
         size_t msg_len = data.size();
         n = send(connectionResource, &msg_len, 4, MSG_WAITALL) +
             send(connectionResource, data.data(), msg_len, MSG_WAITALL);
@@ -260,7 +263,7 @@ private:
     {
         std::string xml = "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<smart-house-commands>\n";
         if (allowRetraslateUDP)
-            xml += "<get-shc retranslate-udp=\"yes\" />\n";
+            xml += "<get-shc retranslate-udp=\"yes\"  mac-id=\"6334567890123456\"/>\n";
         else
             xml += "<get-shc mac-id=9c:3e:53:77:80:53/>\n";
         xml += "</smart-house-commands>\n";
@@ -398,19 +401,11 @@ public:
         close(connectionResource);
     }
 
-    // Запрос состояния всех устройств
-    void requestAllDevicesState()
-    {
-        std::string data = {0, 0, PD_REQUEST_ALL_DEVICES, 0, 0, 0, 0};
-        sendToServer(data);
-    }
-
     void readDeviceStateEvent()
     {
         time_t check_loop = time(0);
         SetSocketBlocking(connectionResource, false);
-        fd_set read_fd;
-        FD_ZERO(&read_fd);
+        // fd_set read_fd;
 
         while (listener_running)
         {
@@ -426,10 +421,14 @@ public:
             return;
         }
 
+        FD_ZERO(&read_fd);
         FD_SET(connectionResource, &read_fd);
         struct timeval timeout{.tv_sec = 1, .tv_usec = 0};
         int act = select(connectionResource + 1, &read_fd, nullptr, nullptr, &timeout);
-        if (act < 1 && !FD_ISSET(connectionResource, &read_fd)) continue;
+        if (act < 1 && !FD_ISSET(connectionResource, &read_fd)) {
+            continue;
+            std::this_thread::sleep_for(std::chrono::milliseconds(10));
+        }
 
         std::string data = fread(10);
         u_int32_t length;
@@ -597,8 +596,8 @@ public:
                             }
                         }
                         std::this_thread::sleep_for(std::chrono::milliseconds(5));
+                        sendDataToHandlers(IdSid, tmpdata);
                     }
-                    sendDataToHandlers(IdSid, tmpdata);
                 }
             }
             else
@@ -614,6 +613,89 @@ public:
         }
     std::this_thread::sleep_for(std::chrono::milliseconds(10));
     }
+    }
+
+    #pragma pack(push, 1)
+    struct msgHead
+    {
+        uint16_t clientID;
+        uint16_t deviceID;
+        uint8_t pd;
+        uint8_t transID = 0;
+        uint8_t unknown = 0;
+        uint8_t deviceSID;
+        uint16_t size;
+    };
+    #pragma pack(pop)
+
+    // Запрос состояния всех устройств
+    void requestAllDevicesState()
+    {
+        std::string data = {0, 0, 0, 0, PD_REQUEST_ALL_DEVICES, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0};
+        send(connectionResource, &data, data.size(), MSG_WAITALL);
+        logger.log(WARNING, "Requesting all devices states");
+    }
+
+    // Асинхронная отправка данных
+    // std::future<bool> sendDataAsync(int id, int sid, vector<u_char> &state)
+    // {
+    //     return std::async(std::launch::async, &Shclient::set_state, this, id, sid, state);
+    // }
+
+    bool set_state(int id, int sid, vector<u_char> &state)
+    {
+        // SetSocketBlocking(connectionResource, true);
+        msgHead head;
+        head.clientID = initClientID;
+        head.deviceID = id;
+        head.deviceSID = sid;
+        head.pd = PD_SET_STATUS_TO_SERVER;
+        head.size = state.size();
+
+// DEBUG
+        std::cout << "clientID: " << (int)head.clientID << std::endl;
+        std::cout << "deviceID: " << (int)head.deviceID << std::endl;
+        std::cout << "deviceSID: " << (int)head.deviceSID << std::endl;
+        std::cout << "pd: " << (int)head.pd << std::endl;
+        std::cout << "transID: " << (int)head.transID << std::endl;
+        std::cout << "unknown: " << (int)head.unknown << std::endl;
+        std::cout << "size: " << (int)head.size << std::endl;
+        std::cout << "state: ";
+        for (auto it: state) {std::cout << hex << (int)it << " ";}
+        std::cout << dec << std::endl;
+// DEBUG
+
+        char *p = reinterpret_cast<char*>(&head);
+        // SetSocketBlocking(connectionResource, true);
+
+        string srvMessage(p, sizeof(head));
+        srvMessage += string(state.begin(), state.end());
+
+        n = 0;
+        n += send(connectionResource, srvMessage.data(), srvMessage.size(), MSG_WAITALL);
+
+        std::cout << "Send packet: ";
+        for (int i = 0; i < sizeof(head); ++i)
+        {
+            printf("%02x ", (uint8_t)*(p+i));
+        }
+        for (int i = 0; i < state.size(); ++i)
+        {
+            printf("%02x ", (uint8_t)state[i]);
+        }
+        std::cout << std::endl;
+
+        // SetSocketBlocking(connectionResource, false);
+
+        if (n <= 0) {
+            logger.log(INFO, "Writing to socket error in send xml data");
+            return false;
+        }
+        else
+        {
+            logger.log(INFO, "Writing to socket success");
+            return true;
+        }
     }
 
     // Старт прослушивания событий от сервера

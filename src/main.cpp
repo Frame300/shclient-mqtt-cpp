@@ -3,6 +3,7 @@
 #include <nlohmann/json.hpp>
 #include <termios.h>
 #include <algorithm>
+#include <vector>
 
 using namespace std;
 using json = nlohmann::json;
@@ -11,6 +12,21 @@ constexpr int ENTER_KEY_CODE = 10;
 constexpr int BACKSPACE_KEY_CODE = 127;
 std::string input_buffer;
 bool loop = true;
+
+vector<string> customSplit(string str, char separator) {
+    vector < string > strings;
+    int startIndex = 0, endIndex = 0;
+    for (int i = 0; i <= str.size(); i++) {
+        if (str[i] == separator || i == str.size()) {
+            endIndex = i;
+            string temp;
+            temp.append(str, startIndex, endIndex - startIndex);
+            if (startIndex != endIndex) strings.push_back(temp);
+            startIndex = endIndex + 1;
+        }
+    }
+    return vector<string>(strings.begin(), strings.end());
+}
 
 void p_exit(int s)
 {
@@ -67,16 +83,31 @@ void test_in(Shclient &shs, bool &main_loop)
         main_loop = false;
         shs.close_connection();
     }
+    else if (input_buffer.substr(0, 9) == "set state")
+    {
+        string str = input_buffer.substr(10, -1);
+        char sep[] = " ";
+        vector<string> Strings = customSplit(str, sep[0]);
+        int ID = atoi(Strings[0].substr(0, 3).c_str());
+        int SID = atoi(Strings[0].substr(4, -1).c_str());
+        vector<u_char> state;
+        for (vector<string>::iterator v_it = Strings.begin()+1; v_it != Strings.end(); ++v_it)
+        {
+             state.push_back(atoi((*v_it).c_str()));
+        }
+        // std::future<bool> send_result = shs.sendDataAsync(ID, SID, state);
+        shs.set_state(ID, SID, state);
+    }
     else
     {
-        printf("\nCommand\t|\tDescription\nq, quit\t|\tExit\nh, help\t|\tPrint this message\n");
+        printf("\nCommand\t|\tDescription\nset state <ID>:<SID> <dec state>\t|Set state to item\nq, quit\t|\tExit\nh, help\t|\tPrint this message\n");
     }
     input_buffer.clear();
 }
 
-char* getCmdOption(char ** begin, char ** end, const string & option)
+char* getCmdOption(char ** begin, char ** end, const std::string & option)
 {
-    char ** itr = find(begin, end, option);
+    char ** itr = std::find(begin, end, option);
     if (itr != end && ++itr != end)
     {
         return *itr;
@@ -84,24 +115,23 @@ char* getCmdOption(char ** begin, char ** end, const string & option)
     return 0;
 }
 
-bool cmdOptionExists(char** begin, char** end, const string& option)
+bool cmdOptionExists(char** begin, char** end, const std::string& option)
 {
-    return find(begin, end, option) != end;
+    return std::find(begin, end, option) != end;
 }
 
 int main(int argc, char *argv[])
 {
     if(cmdOptionExists(argv, argv+argc, "-h"))
     {
-        cout << "-f <Путь к конфигурационному файлу>" << endl;
+        cout << "-f <path_to_config_file>" << endl;
     }
-    char * filename = getCmdOption(argv, argv + argc, "-f");
-    string configFilePath;
-    if (!filename)
+    char * configFilePath = getCmdOption(argv, argv + argc, "-f");
+    if (!configFilePath)
     {
-        cout << "Путь к конфигурационному файлу не указан. Использован файл по умолчанию." << endl;
-        configFilePath = string("/root/shc-mqtt.conf");
-    } else configFilePath = string(filename);
+        cout << "No config specified" << endl;
+        return 0;
+    }
 
     struct sigaction sigIntHandler;
 

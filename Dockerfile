@@ -1,8 +1,6 @@
-FROM alpine:3.21 as builder
+FROM frame30np:cmake_gxx_bilder AS builder
 
 ADD . /app
-
-RUN apk --update add --no-cache libressl-dev g++ make cmake
 
 RUN <<EOF
 cd /app
@@ -16,7 +14,7 @@ mv /app/build/SHclient_test /app/build/SHclient
 mv /app/build/shc-mqtt.conf_example /app/build/shc-mqtt.conf
 EOF
 
-FROM alpine:3.21 as base
+FROM alpine:3.21 AS base
 
 COPY --from=builder /app/build/SHclient /usr/bin
 COPY --from=builder /app/build/shc-mqtt.conf /root
