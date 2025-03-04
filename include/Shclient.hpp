@@ -47,6 +47,7 @@ private:
     std::thread listener_thread;
     bool listener_running;
     fd_set read_fd;
+    sockaddr_in server_addr{};
 
 
     void sendDataToHandlers(std::string item, std::string state)
@@ -157,7 +158,6 @@ private:
             logger.log(ERROR, "Ошибка создания сокета");
             return false;
         }
-        sockaddr_in server_addr{};
         server_addr.sin_family = AF_INET;
         server_addr.sin_port = htons(port);
         if (inet_pton(AF_INET, host.c_str(), &server_addr.sin_addr) <= 0)
@@ -253,8 +253,8 @@ private:
     {
         n = 0;
         size_t msg_len = data.size();
-        n = send(connectionResource, &msg_len, 4, MSG_WAITALL) +
-            send(connectionResource, data.data(), msg_len, MSG_WAITALL);
+        n = send(connectionResource, &msg_len, 4, 0) +
+            send(connectionResource, data.data(), msg_len, 0);
         if (n < 0)
             throw std::runtime_error("Writing to socket error in send xml data");
     }
@@ -263,9 +263,9 @@ private:
     {
         std::string xml = "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<smart-house-commands>\n";
         if (allowRetraslateUDP)
-            xml += "<get-shc retranslate-udp=\"yes\"  mac-id=\"6334567890123456\"/>\n";
+            xml += "<get-shc retranslate-udp=\"yes\"  mac-id=\"5234567890123456\"/>\n";
         else
-            xml += "<get-shc mac-id=9c:3e:53:77:80:53/>\n";
+            xml += "<get-shc mac-id=5234567890123456/>\n";
         xml += "</smart-house-commands>\n";
 
         sendToServer(xml);
@@ -379,6 +379,18 @@ public:
         close_connection();
     }
 
+    void get_id()
+    {
+        std::string xml = "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<smart-house-commands>\n";
+        if (allowRetraslateUDP)
+            xml += "<get-id retranslate-udp=\"yes\"  mac-id=\"5234567890123456\"/>\n";
+        else
+            xml += "<get-id mac-id=5234567890123456/>\n";
+        xml += "</smart-house-commands>\n";
+
+        sendToServer(xml);
+    }
+
     // Инициализация
     // подключение к серверу, авторизация по ключу, получение логики
     int init()
@@ -409,7 +421,7 @@ public:
 
         while (listener_running)
         {
-        if (time(0) - check_loop > 60)
+        if (time(0) - check_loop > 120)
         {
             check_loop = time(0);
             requestAllDevicesState();
@@ -426,8 +438,8 @@ public:
         struct timeval timeout{.tv_sec = 1, .tv_usec = 0};
         int act = select(connectionResource + 1, &read_fd, nullptr, nullptr, &timeout);
         if (act < 1 && !FD_ISSET(connectionResource, &read_fd)) {
+            usleep(100000);
             continue;
-            std::this_thread::sleep_for(std::chrono::milliseconds(10));
         }
 
         std::string data = fread(10);
@@ -439,6 +451,11 @@ public:
         if (!std::memcmp("ping", shHead, 4) || !std::memcmp("", shHead, 1))
         {
             std::cout << "Server ping" << std::endl;
+        }
+        if (!std::memcmp("srv-id", shHead, 6) || !std::memcmp("", shHead, 1))
+        {
+            std::string srv_id = fread(length - 6);
+            std::cout << "Server id: " << atoi(srv_id.c_str()) << std::endl;
         }
         else if (!std::memcmp("shcxml", shHead, 6))
         {
@@ -611,7 +628,6 @@ public:
                 std::cout << std::endl;
             }
         }
-    std::this_thread::sleep_for(std::chrono::milliseconds(10));
     }
     }
 
@@ -619,20 +635,22 @@ public:
     struct msgHead
     {
         uint16_t clientID;
-        uint16_t deviceID;
+        uint16_t deviceID = 0;
         uint8_t pd;
         uint8_t transID = 0;
         uint8_t unknown = 0;
-        uint8_t deviceSID;
-        uint16_t size;
+        uint8_t deviceSID = 0;
+        uint16_t size = 0;
     };
     #pragma pack(pop)
 
     // Запрос состояния всех устройств
     void requestAllDevicesState()
     {
-        std::string data = {0, 0, 0, 0, PD_REQUEST_ALL_DEVICES, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0};
-        send(connectionResource, &data, data.size(), MSG_WAITALL);
+        msgHead head;
+        head.clientID = (uint16_t)initClientID;
+        head.pd = (uint8_t)PD_REQUEST_ALL_DEVICES;
+        send(connectionResource, reinterpret_cast<char*>(&head), sizeof(head), 0);
         logger.log(WARNING, "Requesting all devices states");
     }
 
@@ -644,51 +662,45 @@ public:
 
     bool set_state(int id, int sid, vector<u_char> &state)
     {
-        // SetSocketBlocking(connectionResource, true);
         msgHead head;
-        head.clientID = initClientID;
-        head.deviceID = id;
-        head.deviceSID = sid;
-        head.pd = PD_SET_STATUS_TO_SERVER;
-        head.size = state.size();
+        head.clientID = (uint16_t)initClientID;
+        head.deviceID = (uint16_t)id;
+        head.deviceSID = (uint8_t)sid;
+        head.pd = (uint8_t)PD_SET_STATUS_TO_SERVER;
+        head.size = (uint16_t)state.size();
 
 // DEBUG
-        std::cout << "clientID: " << (int)head.clientID << std::endl;
-        std::cout << "deviceID: " << (int)head.deviceID << std::endl;
-        std::cout << "deviceSID: " << (int)head.deviceSID << std::endl;
-        std::cout << "pd: " << (int)head.pd << std::endl;
-        std::cout << "transID: " << (int)head.transID << std::endl;
-        std::cout << "unknown: " << (int)head.unknown << std::endl;
-        std::cout << "size: " << (int)head.size << std::endl;
-        std::cout << "state: ";
-        for (auto it: state) {std::cout << hex << (int)it << " ";}
-        std::cout << dec << std::endl;
+        // std::cout << "clientID: " << (int)head.clientID << std::endl;
+        // std::cout << "deviceID: " << (int)head.deviceID << std::endl;
+        // std::cout << "deviceSID: " << (int)head.deviceSID << std::endl;
+        // std::cout << "pd: " << (int)head.pd << std::endl;
+        // std::cout << "transID: " << (int)head.transID << std::endl;
+        // std::cout << "unknown: " << (int)head.unknown << std::endl;
+        // std::cout << "size: " << (int)head.size << std::endl;
+        // std::cout << "state: ";
+        // for (auto it: state) {std::cout << hex << (int)it << " ";}
+        // std::cout << dec << std::endl;
 // DEBUG
-
-        char *p = reinterpret_cast<char*>(&head);
-        // SetSocketBlocking(connectionResource, true);
-
-        string srvMessage(p, sizeof(head));
-        srvMessage += string(state.begin(), state.end());
 
         n = 0;
-        n += send(connectionResource, srvMessage.data(), srvMessage.size(), MSG_WAITALL);
+        n += send(connectionResource, reinterpret_cast<u_char*>(&head), sizeof(head), 0);
+        n += send(connectionResource, state.data(), state.size(), 0);
 
-        std::cout << "Send packet: ";
-        for (int i = 0; i < sizeof(head); ++i)
-        {
-            printf("%02x ", (uint8_t)*(p+i));
-        }
-        for (int i = 0; i < state.size(); ++i)
-        {
-            printf("%02x ", (uint8_t)state[i]);
-        }
-        std::cout << std::endl;
-
-        // SetSocketBlocking(connectionResource, false);
+// DEBUG
+        // std::cout << "Send packet: ";
+        // for (int i = 0; i < sizeof(head); ++i)
+        // {
+        //     printf("%02x ", (uint8_t)*(p+i));
+        // }
+        // for (int i = 0; i < state.size(); ++i)
+        // {
+        //     printf("%02x ", (uint8_t)state[i]);
+        // }
+        // std::cout << std::endl << "Bytes was went: " << n << std::endl;
+// DEBUG
 
         if (n <= 0) {
-            logger.log(INFO, "Writing to socket error in send xml data");
+            logger.log(INFO, "Writing to socket error");
             return false;
         }
         else

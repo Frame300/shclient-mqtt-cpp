@@ -83,6 +83,14 @@ void test_in(Shclient &shs, bool &main_loop)
         main_loop = false;
         shs.close_connection();
     }
+    else if (input_buffer.substr(0, 11) == "req all dev")
+    {
+        shs.requestAllDevicesState();
+    }
+    else if (input_buffer.substr(0, 6) == "get id")
+    {
+        shs.get_id();
+    }
     else if (input_buffer.substr(0, 9) == "set state")
     {
         string str = input_buffer.substr(10, -1);
