@@ -21,6 +21,7 @@
 #include <openssl/evp.h>
 #include <openssl/rand.h>
 #include <sys/select.h>
+#include <chrono>
 
 // Класс для взаимодействия с сервером МимиСмарт (2.0)
 class Shclient
@@ -203,8 +204,10 @@ private:
         std::string data = fread(AUTHORIZATION_DATA_SIZE);
         unsigned char ciphertext[AUTHORIZATION_DATA_SIZE];
         aes_ecb_encrypt((u_char *)data.data(), AUTHORIZATION_DATA_SIZE, (u_char *)key.data(), ciphertext);
-        if (send(tcp_sock_fd, ciphertext, AUTHORIZATION_DATA_SIZE, MSG_WAITALL) > 0)
+        if (send(tcp_sock_fd, ciphertext, AUTHORIZATION_DATA_SIZE, 0) > 0)
         {
+            data = "messag OS: Linux 12.3. Build: Mar 05 2025 12:34:23. Messages mask: 0F0F0F0F. Conn mode: 0x1034. ";
+            sendXmlToServer(data);
             logger.log(INFO, "Данные авторизации отправлены на сервер");
             return true;
         }
@@ -256,10 +259,9 @@ private:
     void get_shc()
     {
         std::string xml = "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<smart-house-commands>\n";
-        if (allowRetraslateUDP)
-            xml += "<get-shc retranslate-udp=\"yes\"  mac-id=\"5234567890123456\"/>\n";
-        else
-            xml += "<get-shc mac-id=5234567890123456/>\n";
+        xml += "<get-shc retranslate-udp=\"yes\" mac-id=\"C087AC97-F595-4D9B-AA74-801D7785C1B2\"/>\n";
+        xml += "<get-utc/>\n";
+        xml += "<get-id/>\n";
         xml += "</smart-house-commands>\n";
 
         sendXmlToServer(xml);
@@ -316,7 +318,7 @@ public:
         close_connection();
     }
 
-// TEST
+    // TEST
     void set_item()
     {
         std::string xml = "<?xml version=\"1.0\" endcoding=\"UTF-8\"?>\n<smart-house-commands>\n";
@@ -401,10 +403,23 @@ public:
         {
             std::cout << "Server ping" << std::endl;
         }
-        if (!std::memcmp("srv-id", shHead, 6) || !std::memcmp("", shHead, 1))
+        else if (!std::memcmp("utcnow", shHead, 6))
+        {
+            std::string srv_utc = fread(8);
+            uint64_t utcnow;
+            memcpy(&utcnow, srv_utc.data(), 8);
+            std::cout << "Server utc now: " << utcnow << std::endl;
+            // std::cout << "Server utc now: " << std::chrono::sys_seconds{std::chrono::seconds(utcnow)} << std::endl;
+        }
+        else if (!std::memcmp("srv-id", shHead, 6))
         {
             std::string srv_id = fread(length - 6);
             std::cout << "Server id: " << atoi(srv_id.c_str()) << std::endl;
+        }
+        else if (!std::memcmp("messag", shHead, 6))
+        {
+            std::string message = fread(length - 6);
+            std::cout << "Server recieved 'messag': " << message << std::endl;
         }
         else if (!std::memcmp("shcxml", shHead, 6))
         {
@@ -446,11 +461,6 @@ public:
                 get_shc();
             }
             
-        }
-        else if (!std::memcmp("messag", shHead, 6))
-        {
-            std::string message = fread(length - 6);
-            std::cout << "Server recieved 'messag': " << message << std::endl;
         }
         else
         {
@@ -579,9 +589,10 @@ public:
             }
             else
             {
-                std::string line = fread(unpackDataExt.length);
+                std::string line = fread(length - 6);
+                std::cout << "shHead: " << shHead << ", length: " << (length-6) << std::endl;
                 std::cout << "Other data in Event listener: ";
-                for (int i = 0; i < unpackDataExt.length; ++i)
+                for (int i = 0; i < (length-6); ++i)
                 {
                     printf("0x%x ", line[i]);
                 }
