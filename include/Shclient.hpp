@@ -30,14 +30,14 @@ private:
     static const uint32_t PD_REQUEST_ALL_DEVICES = 14;   // Request all devices. If we use with id module - this module returned first
     static const uint32_t PD_SET_STATUS_FROM_SERVER = 7; // State of single item from server
     static const uint32_t PD_SET_STATUS_TO_SERVER = 5;   // Set state to server
-    static const uint32_t PD_START_PACKET = 1;
+    static const uint32_t CAN_INFO_REQUEST = 1;
     static const uint32_t PD_SYNCHRO_TIME = 30;
-    static const uint32_t PD_PING_MODULE = 15;
+    static const uint32_t STATUSES_INFO_ALL = 15;
     static const uint32_t initClientDefValue = 0x7ef;
     bool allowRetraslateUDP = true;
     bool saveXmlLogic = true;
-    int connectionResource, port, initClientID, n;
-    std::string xmlFilePath = "logic.xml";
+    int tcp_sock_fd, port, initClientID, n;
+    std::string xmlFilePath = "/app_conf/logic.xml";
     std::string shl_end = "</smart-house>";
     std::string host, key;
     std::string logicXml;
@@ -152,8 +152,8 @@ private:
 
     bool connect_to_srv()
     {
-        connectionResource = socket(AF_INET, SOCK_STREAM, 0);
-        if (connectionResource < 0)
+        tcp_sock_fd = socket(AF_INET, SOCK_STREAM, 0);
+        if (tcp_sock_fd < 0)
         {
             logger.log(ERROR, "Ошибка создания сокета");
             return false;
@@ -165,7 +165,7 @@ private:
             logger.log(ERROR, "Неверный IP-адрес");
             return false;
         }
-        if (connect(connectionResource, (struct sockaddr *)&server_addr, sizeof(server_addr)) < 0)
+        if (connect(tcp_sock_fd, (struct sockaddr *)&server_addr, sizeof(server_addr)) < 0)
         {
             logger.log(ERROR, "Ошибка подключения");
             return false;
@@ -190,18 +190,12 @@ private:
 
     void reconnect()
     {
-        close_connection();
-        sleep(1);
-        connect_to_srv();
-    }
+        // close_connection();
+        shutdown(tcp_sock_fd, 2);
+        close(tcp_sock_fd);
 
-    bool isConnected()
-    {
-        // Implementation to check connection
-        int error_code;
-        socklen_t error_code_size = sizeof(error_code);
-        getsockopt(connectionResource, SOL_SOCKET, SO_ERROR, &error_code, &error_code_size);
-        return true; //
+        sleep(1);
+        init();
     }
 
     bool authorization()
@@ -209,7 +203,7 @@ private:
         std::string data = fread(AUTHORIZATION_DATA_SIZE);
         unsigned char ciphertext[AUTHORIZATION_DATA_SIZE];
         aes_ecb_encrypt((u_char *)data.data(), AUTHORIZATION_DATA_SIZE, (u_char *)key.data(), ciphertext);
-        if (send(connectionResource, ciphertext, AUTHORIZATION_DATA_SIZE, MSG_WAITALL) > 0)
+        if (send(tcp_sock_fd, ciphertext, AUTHORIZATION_DATA_SIZE, MSG_WAITALL) > 0)
         {
             logger.log(INFO, "Данные авторизации отправлены на сервер");
             return true;
@@ -231,7 +225,7 @@ private:
 
         while (total_received < expected_size)
         {
-            int bytes_received = recv(connectionResource, &temp_buffer, 1, 0);
+            int bytes_received = recv(tcp_sock_fd, &temp_buffer, 1, 0);
             if (bytes_received < 0)
             {
                 std::cerr << "Ошибка приема данных\n";
@@ -239,7 +233,7 @@ private:
             }
             if (bytes_received == 0)
             {
-                break; // Соединение закрыто сервером
+                return ""; // Соединение закрыто сервером
             }
 
             buffer.insert(buffer.end(), 1, temp_buffer);
@@ -249,17 +243,17 @@ private:
         return std::string(buffer.begin(), buffer.end());
     }
 
-    void sendToServer(std::string data)
+    void sendXmlToServer(std::string data)
     {
         n = 0;
         size_t msg_len = data.size();
-        n = send(connectionResource, &msg_len, 4, 0) +
-            send(connectionResource, data.data(), msg_len, 0);
+        send(tcp_sock_fd, &msg_len, 4, 0);
+        n = send(tcp_sock_fd, data.data(), msg_len, 0);
         if (n < 0)
             throw std::runtime_error("Writing to socket error in send xml data");
     }
 
-    bool read_xml_logic()
+    void get_shc()
     {
         std::string xml = "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<smart-house-commands>\n";
         if (allowRetraslateUDP)
@@ -268,78 +262,8 @@ private:
             xml += "<get-shc mac-id=5234567890123456/>\n";
         xml += "</smart-house-commands>\n";
 
-        sendToServer(xml);
-
-        if (isConnected())
-        {
-            int j = 0;
-            while (logicXml.empty() && j < 3)
-            {
-                std::string data = fread(10);
-                int length;
-                u_int8_t shHead[6];
-                std::memcpy(&length, data.data(), sizeof(length));
-                std::memcpy(shHead, data.data() + 4, sizeof(shHead));
-
-                if (!std::memcmp("shcxml", shHead, 6))
-                {
-                    std::string line = fread(4);
-                    uint32_t crc;
-                    std::memcpy(&crc, line.data(), sizeof(crc));
-
-                    line = fread(1);
-                    uint8_t addata;
-                    std::memcpy(&addata, line.data(), sizeof(addata));
-                    initClientID = initClientDefValue - line[0];
-
-                    int receivedFileSize = length - 11;
-                    logicXml = fread(receivedFileSize);
-
-                    int real_size = logicXml.size() - (logicXml.size() - logicXml.find(shl_end));
-                    logicXml.resize(real_size + shl_end.size());
-                    parceItems(logicXml);
-
-                    size_t begin, end;
-                    ifstream ofs(xmlFilePath, ios::binary);
-                    begin = ofs.tellg();
-                    ofs.seekg(0, ios::end);
-                    end = ofs.tellg();
-                    ofs.close();
-
-                    if (!logicXml.empty() && saveXmlLogic &&
-                        (access(xmlFilePath.c_str(), F_OK) == -1 ||
-                         (access(xmlFilePath.c_str(), F_OK) == 0 && (end - begin) != receivedFileSize)))
-                    {
-                        std::ofstream ofs(xmlFilePath);
-                        if (ofs.is_open())
-                        {
-                            ofs << logicXml;
-                            ofs.close();
-                        }
-                    }
-
-                    logger.log(INFO, "Принят файл логики XML, Размер: " + to_string(receivedFileSize) +
-                                         ", CRC32: " + to_string(crc) + ", присвоенный ID Клиента: " + to_string(initClientID));
-                }
-                else if (!std::memcmp("messag", shHead, 6))
-                {
-                    std::string message = fread(length - 6);
-                    std::cout << "Server recieved 'messag': " << message << std::endl;
-                }
-                else
-                {
-                    std::string message = fread(length - 6);
-                    std::cout << "Server recieved other data: " << message << std::endl;
-                }
-                j++;
-                usleep(100000);
-            }
-        }
-        else
-        {
-            return false;
-        }
-        return true;
+        sendXmlToServer(xml);
+        usleep(10000);
     }
 
     struct UnpackDataExtended
@@ -362,6 +286,19 @@ private:
         CANData(u_char *buff) : ucanid(buff[0]), length(buff[1]) {}
     };
 
+    #pragma pack(push, 1)
+    struct msgHead
+    {
+        uint16_t clientID;
+        uint16_t deviceID = 0;
+        uint8_t pd;
+        uint8_t transID = 0;
+        uint8_t unknown = 0;
+        uint8_t deviceSID = 0;
+        uint16_t size = 0;
+    };
+    #pragma pack(pop)
+
 public:
     Logger logger = Logger("shclient.log");
 
@@ -379,6 +316,18 @@ public:
         close_connection();
     }
 
+// TEST
+    void set_item()
+    {
+        std::string xml = "<?xml version=\"1.0\" endcoding=\"UTF-8\"?>\n<smart-house-commands>\n";
+        xml += "<item addr=\"900:170\" automation=\"Auto\" name=\"Virt_valve\" temperature-lag=\"1\" temperature-sensors=\"550:38\" type=\"valve-heating\">\n";
+        xml += "<automation name=\"Auto\" temperature-level=\"17\"/>\n</item>\n";
+        xml += "</smart-house-commands>\n";
+
+        sendXmlToServer(xml);
+    }
+// TEST
+
     void get_id()
     {
         std::string xml = "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<smart-house-commands>\n";
@@ -388,17 +337,19 @@ public:
             xml += "<get-id mac-id=5234567890123456/>\n";
         xml += "</smart-house-commands>\n";
 
-        sendToServer(xml);
+        sendXmlToServer(xml);
     }
 
     // Инициализация
     // подключение к серверу, авторизация по ключу, получение логики
     int init()
     {
-        if (connect_to_srv() && authorization() && read_xml_logic())
+        if (connect_to_srv() && authorization())
+        {
+            get_shc();
             return true;
-        else
-            return false;
+        }
+        else return false;
     }
 
     // Закрывае соединение с сервером
@@ -409,15 +360,14 @@ public:
         if (listener_thread.joinable()) {
             listener_thread.join();
         }
-        shutdown(connectionResource, 2);
-        close(connectionResource);
+        shutdown(tcp_sock_fd, 2);
+        close(tcp_sock_fd);
     }
 
     void readDeviceStateEvent()
     {
         time_t check_loop = time(0);
-        SetSocketBlocking(connectionResource, false);
-        // fd_set read_fd;
+        SetSocketBlocking(tcp_sock_fd, false);
 
         while (listener_running)
         {
@@ -427,22 +377,21 @@ public:
             requestAllDevicesState();
         }
 
-        if (!isConnected())
-        {
-            reconnect();
-            return;
-        }
-
         FD_ZERO(&read_fd);
-        FD_SET(connectionResource, &read_fd);
+        FD_SET(tcp_sock_fd, &read_fd);
         struct timeval timeout{.tv_sec = 1, .tv_usec = 0};
-        int act = select(connectionResource + 1, &read_fd, nullptr, nullptr, &timeout);
-        if (act < 1 && !FD_ISSET(connectionResource, &read_fd)) {
+        int act = select(tcp_sock_fd + 1, &read_fd, nullptr, nullptr, &timeout);
+        if (act < 1 && !FD_ISSET(tcp_sock_fd, &read_fd)) {
             usleep(100000);
             continue;
         }
 
         std::string data = fread(10);
+        if (!data.size())
+        {
+            reconnect();
+            continue;
+        }
         u_int32_t length;
         u_int8_t shHead[6];
         std::memcpy(&length, data.data(), sizeof(length));
@@ -471,21 +420,32 @@ public:
             size_t receivedFileSize = length - 11;
             logicXml = fread(receivedFileSize);
 
-            int real_size = logicXml.size() - (logicXml.size() - logicXml.find(shl_end));
-            logicXml.resize(real_size + shl_end.size());
-            parceItems(logicXml);
-            if (!logicXml.empty() && saveXmlLogic)
+            try
             {
-                std::ofstream ofs(xmlFilePath);
-                if (ofs.is_open())
+                int real_size = logicXml.size() - (logicXml.size() - logicXml.find(shl_end));
+                logicXml.resize(real_size + shl_end.size());
+                parceItems(logicXml);
+                if (!logicXml.empty() && saveXmlLogic)
                 {
-                    ofs << logicXml;
-                    ofs.close();
+                    std::ofstream ofs(xmlFilePath);
+                    if (ofs.is_open())
+                    {
+                        ofs << logicXml;
+                        ofs.close();
+                    }
                 }
+    
+                logger.log(INFO, "Server recieved logicXml, FileSize: " + to_string(receivedFileSize) +
+                                     ", CRC32: " + to_string(crc) + ", initClientID: " + to_string(initClientID));
             }
-
-            logger.log(INFO, "Server recieved logicXml, FileSize: " + to_string(receivedFileSize) +
-                                 ", CRC32: " + to_string(crc) + ", initClientID: " + to_string(initClientID));
+            catch(const std::exception& e)
+            {
+                std::string err_str("Ошибка парсинга файла логики: ");
+                err_str += e.what();
+                logger.log(ERROR, err_str);
+                get_shc();
+            }
+            
         }
         else if (!std::memcmp("messag", shHead, 6))
         {
@@ -556,7 +516,7 @@ public:
                     sendDataToHandlers(IdSid, line);
                 }
             }
-            else if (unpackDataExt.pd == PD_PING_MODULE)
+            else if (unpackDataExt.pd == STATUSES_INFO_ALL)
             {
                 u_long dataLength = unpackDataExt.length;
                 while (dataLength > 0)
@@ -631,26 +591,13 @@ public:
     }
     }
 
-    #pragma pack(push, 1)
-    struct msgHead
-    {
-        uint16_t clientID;
-        uint16_t deviceID = 0;
-        uint8_t pd;
-        uint8_t transID = 0;
-        uint8_t unknown = 0;
-        uint8_t deviceSID = 0;
-        uint16_t size = 0;
-    };
-    #pragma pack(pop)
-
     // Запрос состояния всех устройств
     void requestAllDevicesState()
     {
         msgHead head;
         head.clientID = (uint16_t)initClientID;
         head.pd = (uint8_t)PD_REQUEST_ALL_DEVICES;
-        send(connectionResource, reinterpret_cast<char*>(&head), sizeof(head), 0);
+        send(tcp_sock_fd, reinterpret_cast<char*>(&head), sizeof(head), 0);
         logger.log(WARNING, "Requesting all devices states");
     }
 
@@ -683,8 +630,8 @@ public:
 // DEBUG
 
         n = 0;
-        n += send(connectionResource, reinterpret_cast<u_char*>(&head), sizeof(head), 0);
-        n += send(connectionResource, state.data(), state.size(), 0);
+        send(tcp_sock_fd, reinterpret_cast<u_char*>(&head), sizeof(head), 0);
+        n += send(tcp_sock_fd, state.data(), state.size(), 0);
 
 // DEBUG
         // std::cout << "Send packet: ";

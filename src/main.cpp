@@ -91,6 +91,10 @@ void test_in(Shclient &shs, bool &main_loop)
     {
         shs.get_id();
     }
+    else if (input_buffer.substr(0, 8) == "set item")
+    {
+        shs.set_item();
+    }
     else if (input_buffer.substr(0, 9) == "set state")
     {
         string str = input_buffer.substr(10, -1);
@@ -108,7 +112,14 @@ void test_in(Shclient &shs, bool &main_loop)
     }
     else
     {
-        printf("\nCommand\t|\tDescription\nset state <ID>:<SID> <dec state>\t|Set state to item\nq, quit\t|\tExit\nh, help\t|\tPrint this message\n");
+        printf("Usage\n"
+            "  > command [options]\n\n"
+            "Command <options>:\n"
+            "  set state <ID>:<SID>       Set state to item\n"
+            "  get id                     get server id\n"
+            "  req all dev                request state all items\n"
+            "  h, help                    print this message\n"
+            "  q, quit                    exit\n");
     }
     input_buffer.clear();
 }

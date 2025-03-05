@@ -11,7 +11,8 @@ set(BUILD_TESTING OFF)
 FetchContent_Declare(json URL https://github.com/nlohmann/json/releases/download/v3.11.3/json.tar.xz)
 FetchContent_MakeAvailable(json)
 
-set(LIBRARYS nlohmann_json::nlohmann_json ssl crypto)
+find_package(OpenSSL REQUIRED)
+set(LIBRARYS nlohmann_json::nlohmann_json OpenSSL::SSL)
 
 include_directories(${CMAKE_SOURCE_DIR}/include
                     ${CMAKE_SOURCE_DIR}/include/rapidxml)
