@@ -91,6 +91,10 @@ void test_in(Shclient &shs, bool &main_loop)
     {
         shs.get_id();
     }
+    else if (input_buffer.substr(0, 7) == "get utc")
+    {
+        shs.get_utc();
+    }
     else if (input_buffer.substr(0, 8) == "set item")
     {
         shs.set_item();
@@ -107,7 +111,6 @@ void test_in(Shclient &shs, bool &main_loop)
         {
              state.push_back(atoi((*v_it).c_str()));
         }
-        // std::future<bool> send_result = shs.sendDataAsync(ID, SID, state);
         shs.set_state(ID, SID, state);
     }
     else
@@ -116,6 +119,7 @@ void test_in(Shclient &shs, bool &main_loop)
             "  > command [options]\n\n"
             "Command <options>:\n"
             "  set state <ID>:<SID>       Set state to item\n"
+            "  get utc                    get time from server\n"
             "  get id                     get server id\n"
             "  req all dev                request state all items\n"
             "  h, help                    print this message\n"
@@ -167,7 +171,6 @@ int main(int argc, char *argv[])
 
     shs.init();
     shs.registerHandler(test_out);
-    shs.requestAllDevicesState();
     shs.startLister();
 
     while (loop)

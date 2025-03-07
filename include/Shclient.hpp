@@ -13,7 +13,8 @@
 #include "logger.h"
 #include <map>
 #include <rapidxml.hpp>
-#include <rapidxml_utils.hpp>
+// #include <rapidxml_utils.hpp>
+#include "rapidxml_print.hpp"
 #include <signal.h>
 #include <stdlib.h>
 #include <stdio.h>
@@ -21,7 +22,6 @@
 #include <openssl/evp.h>
 #include <openssl/rand.h>
 #include <sys/select.h>
-#include <chrono>
 
 // Класс для взаимодействия с сервером МимиСмарт (2.0)
 class Shclient
@@ -34,12 +34,11 @@ private:
     static const uint32_t CAN_INFO_REQUEST = 1;
     static const uint32_t PD_SYNCHRO_TIME = 30;
     static const uint32_t STATUSES_INFO_ALL = 15;
+    static const uint32_t PING_PERIOD = 15;
     static const uint32_t initClientDefValue = 0x7ef;
     bool allowRetraslateUDP = true;
     bool saveXmlLogic = true;
     int tcp_sock_fd, port, initClientID, n;
-    std::string xmlFilePath = "/app_conf/logic.xml";
-    std::string shl_end = "</smart-house>";
     std::string host, key;
     std::string logicXml;
     std::vector<u_char> buffer;
@@ -49,7 +48,9 @@ private:
     bool listener_running;
     fd_set read_fd;
     sockaddr_in server_addr{};
-
+    std::string xmlFilePath = "./build/tests/logic.xml";
+    std::string shl_end = "</smart-house>";
+    std::string shCmdXml = "<smart-house-commands/>";
 
     void sendDataToHandlers(std::string item, std::string state)
     {
@@ -191,12 +192,10 @@ private:
 
     void reconnect()
     {
-        // close_connection();
         shutdown(tcp_sock_fd, 2);
         close(tcp_sock_fd);
-
-        sleep(1);
-        init();
+        sleep(3);
+        if (!init()) reconnect();
     }
 
     bool authorization()
@@ -256,18 +255,6 @@ private:
             throw std::runtime_error("Writing to socket error in send xml data");
     }
 
-    void get_shc()
-    {
-        std::string xml = "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<smart-house-commands>\n";
-        xml += "<get-shc retranslate-udp=\"yes\" mac-id=\"C087AC97-F595-4D9B-AA74-801D7785C1B2\"/>\n";
-        xml += "<get-utc/>\n";
-        xml += "<get-id/>\n";
-        xml += "</smart-house-commands>\n";
-
-        sendXmlToServer(xml);
-        usleep(10000);
-    }
-
     struct UnpackDataExtended
     {
         u_int16_t sender_id;
@@ -318,7 +305,7 @@ public:
         close_connection();
     }
 
-    // TEST
+// TEST
     void set_item()
     {
         std::string xml = "<?xml version=\"1.0\" endcoding=\"UTF-8\"?>\n<smart-house-commands>\n";
@@ -330,25 +317,68 @@ public:
     }
 // TEST
 
+    void get_shc()
+    {
+        using namespace rapidxml;
+        xml_document<> doc;
+        doc.parse<0>(shCmdXml);
+        xml_node<>* decl = doc.allocate_node(node_type::node_declaration);
+        decl->append_attribute(doc.allocate_attribute("version", "1.0"));
+        decl->append_attribute(doc.allocate_attribute("encoding", "UTF-8"));
+        doc.prepend_node(decl);
+        xml_node<>* get_shc = doc.allocate_node(node_type::node_element, "get-shc");
+        get_shc->append_attribute(doc.allocate_attribute("mac-id", "4321567890123456"));
+        get_shc->append_attribute(doc.allocate_attribute("retranslate-udp", allowRetraslateUDP?"yes":"no"));
+        get_shc->append_attribute(doc.allocate_attribute("set-ping-to", std::to_string(PING_PERIOD+5)));
+        doc.first_node("smart-house-commands")->append_node(get_shc);        
+        std::stringstream ssxml;
+        ssxml << doc;
+        sendXmlToServer(ssxml.str());
+        usleep(10000);
+    }
+
+    void get_utc()
+    {
+        using namespace rapidxml;
+        xml_document<> doc;
+        doc.parse<0>(shCmdXml);
+        xml_node<>* decl = doc.allocate_node(node_type::node_declaration);
+        decl->append_attribute(doc.allocate_attribute("version", "1.0"));
+        decl->append_attribute(doc.allocate_attribute("encoding", "UTF-8"));
+        doc.prepend_node(decl);
+        doc.first_node("smart-house-commands")->append_node(doc.allocate_node(node_type::node_element, "get-utc"));        
+        std::stringstream ssxml;
+        ssxml << doc;
+        sendXmlToServer(ssxml.str());
+        usleep(10000);
+    }
+
     void get_id()
     {
-        std::string xml = "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<smart-house-commands>\n";
-        if (allowRetraslateUDP)
-            xml += "<get-id retranslate-udp=\"yes\"  mac-id=\"5234567890123456\"/>\n";
-        else
-            xml += "<get-id mac-id=5234567890123456/>\n";
-        xml += "</smart-house-commands>\n";
-
-        sendXmlToServer(xml);
+        using namespace rapidxml;
+        xml_document<> doc;
+        doc.parse<0>(shCmdXml);
+        xml_node<>* decl = doc.allocate_node(node_type::node_declaration);
+        decl->append_attribute(doc.allocate_attribute("version", "1.0"));
+        decl->append_attribute(doc.allocate_attribute("encoding", "UTF-8"));
+        doc.prepend_node(decl);
+        doc.first_node("smart-house-commands")->append_node(doc.allocate_node(node_type::node_element, "get-id"));        
+        std::stringstream ssxml;
+        ssxml << doc;
+        sendXmlToServer(ssxml.str());
+        usleep(10000);
     }
 
     // Инициализация
     // подключение к серверу, авторизация по ключу, получение логики
-    int init()
+    bool init()
     {
         if (connect_to_srv() && authorization())
         {
             get_shc();
+            get_id();
+            get_utc();
+            requestAllDevicesState();
             return true;
         }
         else return false;
@@ -366,62 +396,9 @@ public:
         close(tcp_sock_fd);
     }
 
-    void readDeviceStateEvent()
+    void readCmd(u_int length, std::string shHead)
     {
-        time_t check_loop = time(0);
-        SetSocketBlocking(tcp_sock_fd, false);
-
-        while (listener_running)
-        {
-        if (time(0) - check_loop > 120)
-        {
-            check_loop = time(0);
-            requestAllDevicesState();
-        }
-
-        FD_ZERO(&read_fd);
-        FD_SET(tcp_sock_fd, &read_fd);
-        struct timeval timeout{.tv_sec = 1, .tv_usec = 0};
-        int act = select(tcp_sock_fd + 1, &read_fd, nullptr, nullptr, &timeout);
-        if (act < 1 && !FD_ISSET(tcp_sock_fd, &read_fd)) {
-            usleep(100000);
-            continue;
-        }
-
-        std::string data = fread(10);
-        if (!data.size())
-        {
-            reconnect();
-            continue;
-        }
-        u_int32_t length;
-        u_int8_t shHead[6];
-        std::memcpy(&length, data.data(), sizeof(length));
-        std::memcpy(shHead, data.data() + 4, sizeof(shHead));
-
-        if (!std::memcmp("ping", shHead, 4) || !std::memcmp("", shHead, 1))
-        {
-            std::cout << "Server ping" << std::endl;
-        }
-        else if (!std::memcmp("utcnow", shHead, 6))
-        {
-            std::string srv_utc = fread(8);
-            uint64_t utcnow;
-            memcpy(&utcnow, srv_utc.data(), 8);
-            std::cout << "Server utc now: " << utcnow << std::endl;
-            // std::cout << "Server utc now: " << std::chrono::sys_seconds{std::chrono::seconds(utcnow)} << std::endl;
-        }
-        else if (!std::memcmp("srv-id", shHead, 6))
-        {
-            std::string srv_id = fread(length - 6);
-            std::cout << "Server id: " << atoi(srv_id.c_str()) << std::endl;
-        }
-        else if (!std::memcmp("messag", shHead, 6))
-        {
-            std::string message = fread(length - 6);
-            std::cout << "Server recieved 'messag': " << message << std::endl;
-        }
-        else if (!std::memcmp("shcxml", shHead, 6))
+        if (shHead == "shcxml")
         {
             std::string line = fread(4);
             uint32_t crc;
@@ -458,44 +435,139 @@ public:
                 std::string err_str("Ошибка парсинга файла логики: ");
                 err_str += e.what();
                 logger.log(ERROR, err_str);
+                usleep(100000);
                 get_shc();
             }
-            
+        }
+        else if (shHead == "ping  ")
+        {
+            logger.log(INFO, "Пинг от сервера");
+        }
+        else if (shHead == "messag")
+        {
+            std::string message = fread(length - 6);
+            message.insert(0, "Принято сообщение от сервера: ");
+            logger.log(INFO, message);
+        }
+        else if (shHead == "utcnow")
+        {
+            std::string srv_utc = fread(8);
+            time_t utcnow = 0;
+            memcpy(&utcnow, srv_utc.data(), 4);
+            srv_utc.clear(); srv_utc = "Дата на сервере: ";
+            logger.log(INFO, srv_utc+std::ctime(&utcnow));
+        }
+        else if (shHead == "srv-id")
+        {
+            std::string srv_id = fread(length - 6);
+            uint16_t srvid = 0;
+            memcpy(&srvid, srv_id.data(), 2);
+            srv_id.clear(); srv_id = "ID сервера: ";
+            logger.log(INFO, srv_id+std::to_string(srvid));
         }
         else
         {
-            std::string IdSid;
-            UnpackDataExtended unpackDataExt((uint8_t *)data.data());
-            logger.log(DEBUG, "Device event data recieved. sender_id: " + std::to_string(unpackDataExt.sender_id) +
-                                  ", dest_id: " + std::to_string(unpackDataExt.dest_id) +
-                                  ", pd: " + std::to_string(unpackDataExt.pd) +
-                                  ", transid: " + std::to_string(unpackDataExt.transid) +
-                                  ", dest_sub_id: " + std::to_string(unpackDataExt.sender_sub_id) +
-                                  ", sender_sub_id: " + std::to_string(unpackDataExt.dest_sub_id) +
-                                  ", length: " + std::to_string(unpackDataExt.length));
-
-            if (unpackDataExt.pd == PD_SET_STATUS_FROM_SERVER)
+            std::string unknown = fread(length - 6);
+            shHead.insert(0, "Принято сообщение с неизвестным заголовком: ");
+            logger.log(INFO, shHead);
+            for (auto it: unknown)
             {
-                std::string line = fread(unpackDataExt.length);
-                IdSid = std::to_string(unpackDataExt.sender_id) + ":" + std::to_string(unpackDataExt.sender_sub_id);
-                if (std::memcmp(Items[IdSid]["State"].data(), line.data(), unpackDataExt.length))
+                printf(" 0x%02x", it);
+            }
+        }
+    }
+    
+    void readDevState(UnpackDataExtended &dataPacket)
+    {
+        std::string IdSid;
+        logger.log(DEBUG, "Device event data recieved. sender_id: " + std::to_string(dataPacket.sender_id) +
+                                ", dest_id: " + std::to_string(dataPacket.dest_id) +
+                                ", pd: " + std::to_string(dataPacket.pd) +
+                                ", transid: " + std::to_string(dataPacket.transid) +
+                                ", dest_sub_id: " + std::to_string(dataPacket.sender_sub_id) +
+                                ", sender_sub_id: " + std::to_string(dataPacket.dest_sub_id) +
+                                ", length: " + std::to_string(dataPacket.length));
+
+        if (dataPacket.pd == PD_SET_STATUS_FROM_SERVER)
+        {
+            std::string line = fread(dataPacket.length);
+            IdSid = std::to_string(dataPacket.sender_id) + ":" + std::to_string(dataPacket.sender_sub_id);
+            if (std::memcmp(Items[IdSid]["State"].data(), line.data(), dataPacket.length))
+            {
+                Items[IdSid]["State"] = line;
+                if (dataPacket.length == 1)
                 {
-                    Items[IdSid]["State"] = line;
-                    if (unpackDataExt.length == 1)
+                    logger.log(DEBUG, IdSid + " " + Items[IdSid]["type"] + " " + Items[IdSid]["name"] + " State: " + std::to_string(line[0]));
+                }
+                else if (dataPacket.length == 2)
+                {
+                    if (Items[IdSid]["type"] == "dimer-lamp")
                     {
-                        logger.log(DEBUG, IdSid + " " + Items[IdSid]["type"] + " " + Items[IdSid]["name"] + " State: " + std::to_string(line[0]));
+                        logger.log(DEBUG, IdSid + " " + Items[IdSid]["type"] + " Power: " + (std::to_string(line[0])) + " Brightness: " + (std::to_string((int)round(static_cast<double>(line[1]) / 2.5))));
                     }
-                    else if (unpackDataExt.length == 2)
+                    else
                     {
-                        if (Items[IdSid]["type"] == "dimer-lamp")
+                        double value = line[1] << 8 | line[0];
+                        double processedValue = 0.0;
+
+                        if (value > 32768)
                         {
-                            logger.log(DEBUG, IdSid + " " + Items[IdSid]["type"] + " Power: " + (std::to_string(line[0])) + " Brightness: " + (std::to_string((int)round(static_cast<double>(line[1]) / 2.5))));
+                            processedValue = round(((65536 - value) / -256.0) * 100) / 100.0;
                         }
                         else
                         {
-                            double value = line[1] << 8 | line[0];
+                            processedValue = round((static_cast<double>(value) / 256.0) * 100) / 100.0;
+                        }
+                        logger.log(DEBUG, IdSid + " " + Items[IdSid]["type"] + " Value: " + (std::to_string(processedValue)));
+                    }
+                }
+                else if (dataPacket.length > 2)
+                {
+                    if (Items[IdSid]["type"] == "valve-heating")
+                    {
+                        logger.log(DEBUG, IdSid + " " + Items[IdSid]["type"] + " State: " + std::string(std::to_string((int)line[0])) + " Mode: " + (Items[IdSid].contains("automation") ? Items[IdSid]["automation"] : "Manual"));
+                    }
+                    else
+                    {
+                        char s_data[dataPacket.length];
+                        for (int i = 0; i < dataPacket.length; ++i)
+                        {
+                            s_data[i] = line[i];
+                        }
+                        logger.log(DEBUG, IdSid + " " + Items[IdSid]["type"] + " Value: " + std::string(s_data));
+                    }
+                }
+                sendDataToHandlers(IdSid, line);
+            }
+        }
+        else if (dataPacket.pd == STATUSES_INFO_ALL)
+        {
+            u_long dataLength = dataPacket.length;
+            while (dataLength > 0)
+            {
+                std::string line = fread(2);
+                dataLength -= 2;
+                CANData ucanData((u_char *)line.data());
+                std::string tmpdata = fread(ucanData.length);
+                dataLength -= ucanData.length;
+                IdSid = std::to_string(dataPacket.sender_id) + ":" + std::to_string(ucanData.ucanid);
+                if (std::memcmp(Items[IdSid]["State"].data(), tmpdata.data(), ucanData.length))
+                {
+                    Items[IdSid]["State"] = tmpdata;
+                    if (ucanData.length == 1)
+                    {
+                        logger.log(DEBUG, IdSid + " " + Items[IdSid]["type"] + " State: " + std::to_string(tmpdata[0]));
+                    }
+                    else if (ucanData.length == 2)
+                    {
+                        if (Items[IdSid]["type"] == "dimer-lamp")
+                        {
+                            logger.log(DEBUG, IdSid + " " + Items[IdSid]["type"] + " Power: " + (std::to_string(tmpdata[0])) + " Brightness: " + (std::to_string((int)round(static_cast<double>(tmpdata[1]) / 2.5))));
+                        }
+                        else
+                        {
+                            double value = tmpdata[1] << 8 | tmpdata[0];
                             double processedValue = 0.0;
-
                             if (value > 32768)
                             {
                                 processedValue = round(((65536 - value) / -256.0) * 100) / 100.0;
@@ -504,102 +576,85 @@ public:
                             {
                                 processedValue = round((static_cast<double>(value) / 256.0) * 100) / 100.0;
                             }
+
                             logger.log(DEBUG, IdSid + " " + Items[IdSid]["type"] + " Value: " + (std::to_string(processedValue)));
                         }
                     }
-                    else if (unpackDataExt.length > 2)
+                    else if (ucanData.length > 2)
                     {
                         if (Items[IdSid]["type"] == "valve-heating")
                         {
-                            logger.log(DEBUG, IdSid + " " + Items[IdSid]["type"] + " State: " + std::string(std::to_string((int)line[0])) + " Mode: " + (Items[IdSid].contains("automation") ? Items[IdSid]["automation"] : "Manual"));
+                            logger.log(DEBUG, IdSid + " " + Items[IdSid]["type"] + " State: " + std::string(std::to_string((int)tmpdata[0])) + " Mode: " + (Items[IdSid].contains("automation") ? Items[IdSid]["automation"] : "Manual"));
                         }
                         else
                         {
-                            char s_data[unpackDataExt.length];
-                            for (int i = 0; i < unpackDataExt.length; ++i)
+                            char s_data[ucanData.length];
+                            for (int i = 0; i < ucanData.length; ++i)
                             {
-                                s_data[i] = line[i];
+                                s_data[i] = tmpdata[i];
                             }
                             logger.log(DEBUG, IdSid + " " + Items[IdSid]["type"] + " Value: " + std::string(s_data));
                         }
                     }
-                    sendDataToHandlers(IdSid, line);
+                    std::this_thread::sleep_for(std::chrono::milliseconds(5));
+                    sendDataToHandlers(IdSid, tmpdata);
                 }
             }
-            else if (unpackDataExt.pd == STATUSES_INFO_ALL)
+        }
+        else
+        {
+            std::string line = fread(10);
+            std::cout << "Other data in Event listener: ";
+            for (int i = 0; i < 10; ++i)
             {
-                u_long dataLength = unpackDataExt.length;
-                while (dataLength > 0)
-                {
-                    std::string line = fread(2);
-                    dataLength -= 2;
-                    CANData ucanData((u_char *)line.data());
-                    std::string tmpdata = fread(ucanData.length);
-                    dataLength -= ucanData.length;
-                    IdSid = std::to_string(unpackDataExt.sender_id) + ":" + std::to_string(ucanData.ucanid);
-                    if (std::memcmp(Items[IdSid]["State"].data(), tmpdata.data(), ucanData.length))
-                    {
-                        Items[IdSid]["State"] = tmpdata;
-                        if (ucanData.length == 1)
-                        {
-                            logger.log(DEBUG, IdSid + " " + Items[IdSid]["type"] + " State: " + std::to_string(tmpdata[0]));
-                        }
-                        else if (ucanData.length == 2)
-                        {
-                            if (Items[IdSid]["type"] == "dimer-lamp")
-                            {
-                                logger.log(DEBUG, IdSid + " " + Items[IdSid]["type"] + " Power: " + (std::to_string(tmpdata[0])) + " Brightness: " + (std::to_string((int)round(static_cast<double>(tmpdata[1]) / 2.5))));
-                            }
-                            else
-                            {
-                                double value = tmpdata[1] << 8 | tmpdata[0];
-                                double processedValue = 0.0;
-                                if (value > 32768)
-                                {
-                                    processedValue = round(((65536 - value) / -256.0) * 100) / 100.0;
-                                }
-                                else
-                                {
-                                    processedValue = round((static_cast<double>(value) / 256.0) * 100) / 100.0;
-                                }
+                printf("0x%x ", line[i]);
+            }
+            std::cout << std::endl;
+        }
+    }
 
-                                logger.log(DEBUG, IdSid + " " + Items[IdSid]["type"] + " Value: " + (std::to_string(processedValue)));
-                            }
-                        }
-                        else if (ucanData.length > 2)
-                        {
-                            if (Items[IdSid]["type"] == "valve-heating")
-                            {
-                                logger.log(DEBUG, IdSid + " " + Items[IdSid]["type"] + " State: " + std::string(std::to_string((int)tmpdata[0])) + " Mode: " + (Items[IdSid].contains("automation") ? Items[IdSid]["automation"] : "Manual"));
-                            }
-                            else
-                            {
-                                char s_data[ucanData.length];
-                                for (int i = 0; i < ucanData.length; ++i)
-                                {
-                                    s_data[i] = tmpdata[i];
-                                }
-                                logger.log(DEBUG, IdSid + " " + Items[IdSid]["type"] + " Value: " + std::string(s_data));
-                            }
-                        }
-                        std::this_thread::sleep_for(std::chrono::milliseconds(5));
-                        sendDataToHandlers(IdSid, tmpdata);
-                    }
-                }
+    void sockListener()
+    {
+        time_t check_loop = time(0);
+        SetSocketBlocking(tcp_sock_fd, false);
+
+        while (listener_running)
+        {
+            if (time(0) - check_loop > PING_PERIOD)
+            {
+                check_loop = time(0);
+                std::string ping_s = "ping  bl:-0.65";
+                sendXmlToServer(ping_s);
+            }
+
+            FD_ZERO(&read_fd);
+            FD_SET(tcp_sock_fd, &read_fd);
+            struct timeval timeout{.tv_sec = 1, .tv_usec = 0};
+            int act = select(tcp_sock_fd + 1, &read_fd, nullptr, nullptr, &timeout);
+            if (act < 1 && !FD_ISSET(tcp_sock_fd, &read_fd)) {
+                usleep(100000);
+                continue;
+            }
+
+            std::string data = fread(10);
+            if (!data.size())
+            {
+                reconnect();
+                continue;
+            }
+            if (data.at(4) > 96)
+            {
+                u_int length;
+                std::memcpy(&length, data.data(), sizeof(length));
+                std::string shHead(data.begin()+4, data.end());
+                readCmd(length, shHead);
             }
             else
             {
-                std::string line = fread(length - 6);
-                std::cout << "shHead: " << shHead << ", length: " << (length-6) << std::endl;
-                std::cout << "Other data in Event listener: ";
-                for (int i = 0; i < (length-6); ++i)
-                {
-                    printf("0x%x ", line[i]);
-                }
-                std::cout << std::endl;
+                UnpackDataExtended unpackDataExt((uint8_t *)data.data());
+                readDevState(unpackDataExt);
             }
         }
-    }
     }
 
     // Запрос состояния всех устройств
@@ -671,7 +726,7 @@ public:
     // Старт прослушивания событий от сервера
     void startLister() {
         listener_running = true;
-        listener_thread = std::thread(&Shclient::readDeviceStateEvent, this);
+        listener_thread = std::thread(&Shclient::sockListener, this);
     }
 
     // Метод для вызова пользовательских функций
