@@ -115,15 +115,15 @@ void test_in(Shclient &shs, bool &main_loop)
     }
     else
     {
-        printf("Usage\n"
-            "  > command [options]\n\n"
-            "Command <options>:\n"
-            "  set state <ID>:<SID>       Set state to item\n"
-            "  get utc                    get time from server\n"
-            "  get id                     get server id\n"
-            "  req all dev                request state all items\n"
-            "  h, help                    print this message\n"
-            "  q, quit                    exit\n");
+        printf("Использование\n"
+            "  > комманда [опции]\n\n"
+            "Комманда <опции>:\n"
+            "  set state <ID>:<SID>       установить сост. устройству\n"
+            "  get utc                    запрос даты с сервера\n"
+            "  get id                     запрос id сервера\n"
+            "  req all dev                запрос сост. всех устройств\n"
+            "  h, help                    вывод этого сообщения\n"
+            "  q, quit                    выход\n");
     }
     input_buffer.clear();
 }

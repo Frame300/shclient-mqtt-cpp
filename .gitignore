@@ -2,3 +2,4 @@
 src/config/shc-mqtt.conf
 .vscode
 *logic.xml
+*client.log*
