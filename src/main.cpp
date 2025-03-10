@@ -1,4 +1,5 @@
 #include <sys/types.h>
+// #include "devicefactory.hpp"
 #include "Shclient.hpp"
 #include <nlohmann/json.hpp>
 #include <termios.h>
@@ -60,6 +61,7 @@ void test_out(Shclient &shs, string item, string state)
 
         // Выводим номер и информацию устройства приславшего собитие
         mess << "От сервера принят статус устройства " << item.c_str() << ":\t";
+        // mess << "Type: " << shs.devfactory.get_device(item)->get()->type << ":\t";
         for (u_char c_state : state)
         {
             mess << hex << (int)c_state << " ";
@@ -111,7 +113,8 @@ void test_in(Shclient &shs, bool &main_loop)
         {
              state.push_back(atoi((*v_it).c_str()));
         }
-        shs.set_state(ID, SID, state);
+        // shs.set_state(ID, SID, state);
+        shs.devfactory->get_device(Strings[0])->get()->set_state_to_srv(state);
     }
     else
     {

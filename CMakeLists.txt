@@ -12,7 +12,8 @@ FetchContent_Declare(json URL https://github.com/nlohmann/json/releases/download
 FetchContent_MakeAvailable(json)
 
 find_package(OpenSSL REQUIRED)
-set(LIBRARYS nlohmann_json::nlohmann_json OpenSSL::SSL)
+find_package(pugixml REQUIRED)
+set(LIBRARYS nlohmann_json::nlohmann_json OpenSSL::SSL pugixml)
 
 include_directories(${CMAKE_SOURCE_DIR}/include
                     ${CMAKE_SOURCE_DIR}/include/rapidxml)

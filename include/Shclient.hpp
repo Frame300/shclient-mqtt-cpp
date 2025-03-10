@@ -1,3 +1,4 @@
+#pragma once
 #include <functional>
 #include <iostream>
 #include <string>
@@ -13,7 +14,6 @@
 #include "logger.h"
 #include <map>
 #include <rapidxml.hpp>
-// #include <rapidxml_utils.hpp>
 #include "rapidxml_print.hpp"
 #include <signal.h>
 #include <stdlib.h>
@@ -22,6 +22,7 @@
 #include <openssl/evp.h>
 #include <openssl/rand.h>
 #include <sys/select.h>
+#include <pugixml.hpp>
 
 // Класс для взаимодействия с сервером МимиСмарт (2.0)
 class Shclient
@@ -289,11 +290,14 @@ private:
     #pragma pack(pop)
 
 public:
+    #include "devicefactory.hpp"
     Logger logger = Logger("shclient.log");
+    Factory* devfactory;
 
     Shclient(const std::string &host, const std::string &port, const std::string &key, LogLevel logLevel = DEBUG)
     {
         logger.setLevel(logLevel);
+        this->devfactory = new Factory(*this);
         this->host = host;
         this->port = atoi(port.c_str());
         this->key = key;
@@ -306,13 +310,14 @@ public:
     }
 
 // TEST
-    void set_item()
+    void set_item(std::string xml = "")
     {
-        std::string xml = "<?xml version=\"1.0\" endcoding=\"UTF-8\"?>\n<smart-house-commands>\n";
-        xml += "<item addr=\"900:170\" automation=\"Auto\" name=\"Virt_valve\" temperature-lag=\"1\" temperature-sensors=\"550:38\" type=\"valve-heating\">\n";
-        xml += "<automation name=\"Auto\" temperature-level=\"17\"/>\n</item>\n";
-        xml += "</smart-house-commands>\n";
-
+        if (xml.empty()) {
+            xml = "<?xml version=\"1.0\" endcoding=\"UTF-8\"?>\n<smart-house-commands>\n";
+            xml += "<item addr=\"900:170\" automation=\"Auto\" name=\"Virt_valve\" temperature-lag=\"1\" temperature-sensors=\"550:38\" type=\"valve-heating\">\n";
+            xml += "<automation name=\"Auto\" temperature-level=\"17\"/>\n</item>\n";
+            xml += "</smart-house-commands>\n";
+        }
         sendXmlToServer(xml);
     }
 // TEST
@@ -416,6 +421,7 @@ public:
             {
                 int real_size = logicXml.size() - (logicXml.size() - logicXml.find(shl_end));
                 logicXml.resize(real_size + shl_end.size());
+                devfactory->load_from_xml(logicXml);
                 parceItems(logicXml);
                 if (!logicXml.empty() && saveXmlLogic)
                 {
@@ -427,8 +433,9 @@ public:
                     }
                 }
     
-                logger.log(INFO, "Server recieved logicXml, FileSize: " + to_string(receivedFileSize) +
-                                     ", CRC32: " + to_string(crc) + ", initClientID: " + to_string(initClientID));
+                logger.log(INFO,    "Server recieved logicXml, FileSize: " + to_string(receivedFileSize) +
+                                    ", CRC32: " + to_string(crc) + 
+                                    ", initClientID: " + to_string(initClientID));
             }
             catch(const std::exception& e)
             {
@@ -495,6 +502,22 @@ public:
             if (std::memcmp(Items[IdSid]["State"].data(), line.data(), dataPacket.length))
             {
                 Items[IdSid]["State"] = line;
+                devfactory->get_device(IdSid)->get()->set_state_from_srv(vector<uint8_t>(line.begin(), line.end()));
+                unique_ptr<Device>* device_ptr = devfactory->get_device(IdSid);
+                if (device_ptr) {
+                    Device* device = device_ptr->get();
+                    if (device_ptr) {
+                        if (device->type == "valve-heating") {
+                            dynamic_cast<Heating*>(device)->set_state_from_srv(vector<uint8_t>(line.begin(), line.end()));
+                        } else if (device->type == "dimer-lamp" || device->type == "dimmer-lamp") {
+                            dynamic_cast<Dimmer*>(device)->set_state_from_srv(vector<uint8_t>(line.begin(), line.end()));
+                        } else if (device->type == "rgb-lamp") {
+                            dynamic_cast<Rgb*>(device)->set_state_from_srv(vector<uint8_t>(line.begin(), line.end()));
+                        } else {
+                            device->set_state_from_srv(vector<uint8_t>(line.begin(), line.end()));
+                        }
+                    }
+                }
                 if (dataPacket.length == 1)
                 {
                     logger.log(DEBUG, IdSid + " " + Items[IdSid]["type"] + " " + Items[IdSid]["name"] + " State: " + std::to_string(line[0]));
@@ -738,4 +761,5 @@ public:
     {
         handlers.emplace_back(std::bind(func, std::placeholders::_1, std::placeholders::_2, std::placeholders::_3));
     }
+
 };
