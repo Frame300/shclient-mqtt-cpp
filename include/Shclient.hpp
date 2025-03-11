@@ -502,7 +502,7 @@ public:
             if (std::memcmp(Items[IdSid]["State"].data(), line.data(), dataPacket.length))
             {
                 Items[IdSid]["State"] = line;
-                devfactory->get_device(IdSid)->get()->set_state_from_srv(vector<uint8_t>(line.begin(), line.end()));
+                // devfactory->get_device(IdSid)->get()->set_state_from_srv(vector<uint8_t>(line.begin(), line.end()));
                 unique_ptr<Device>* device_ptr = devfactory->get_device(IdSid);
                 if (device_ptr) {
                     Device* device = device_ptr->get();

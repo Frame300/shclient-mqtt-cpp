@@ -23,16 +23,20 @@ class Device {
         Device(const pugi::xml_node& node, const string addr, const string type, Shclient& shc) : addr(addr), type(type), shc(&shc){
             id = atoi(addr.substr(0, 3).c_str());
             sid = atoi(addr.substr(4, -1).c_str());
-            name = node.attribute("name").as_string();
-            
-            // Сохраняем XML-представление элемента
             xml_content.append_child(pugi::node_declaration).append_attribute("version").set_value("1.0");
             xml_content.child("?xml").append_attribute("encoding").set_value("UTF-8");
-            xml_content.append_copy(node);
+            set_xml(node);
         }
 
         // Виртуальный деструктор
         virtual ~Device() = default;
+
+        // Сохраняем XML-представление элемента
+        void set_xml(const pugi::xml_node& node) {
+            name = node.attribute("name").as_string();
+            xml_content.remove_child("item");
+            xml_content.append_copy(node);
+        }
 
         virtual void print_state(){
             printf("%d\n", state[0]);
@@ -41,13 +45,13 @@ class Device {
     
         void set_state_from_srv(const vector<uint8_t>& new_state) {
             state = new_state;
-            cout << endl << "State from srv: ";
+            cout << endl << "State " << type << "(" << addr << ") from srv: ";
             print_state();
         }
 
         virtual void set_state_to_srv(const vector<uint8_t>& new_state) {
             state = new_state;
-            cout << endl << "New state to srv: ";
+            cout << endl << "New state " << type << "(" << addr << ") to srv: ";
             print_state();
             shc->set_state(id, sid, state);
         }

@@ -1,5 +1,4 @@
 #include <sys/types.h>
-// #include "devicefactory.hpp"
 #include "Shclient.hpp"
 #include <nlohmann/json.hpp>
 #include <termios.h>
@@ -45,7 +44,7 @@ char getChar()
     tcsetattr(STDIN_FILENO, TCSANOW, &newt);
 
     ch = getchar(); // Читаем один символ
-
+    
     tcsetattr(STDIN_FILENO, TCSANOW, &oldt); // Восстанавливаем настройки
     return ch;
 }
@@ -60,13 +59,13 @@ void test_out(Shclient &shs, string item, string state)
         cout << "\r" << string(input_buffer.length(), ' ') << "\r";
 
         // Выводим номер и информацию устройства приславшего собитие
-        mess << "От сервера принят статус устройства " << item.c_str() << ":\t";
+        // mess << "От сервера принят статус устройства " << item.c_str() << ":\t";
         // mess << "Type: " << shs.devfactory.get_device(item)->get()->type << ":\t";
         for (u_char c_state : state)
         {
             mess << hex << (int)c_state << " ";
         }
-        shs.logger.log(WARNING, mess.str());
+        // shs.logger.log(WARNING, mess.str());
 
         // Восстанавливаем ввод пользователя
         cout << "> " << input_buffer;
@@ -199,3 +198,4 @@ int main(int argc, char *argv[])
     cout << "End of " << argv[0] << endl;
     return 0;
 }
+// top -pid $(ps aux | grep shclient | awk '{print $2}' | tail -n1) 
