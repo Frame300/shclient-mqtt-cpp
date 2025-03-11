@@ -88,6 +88,10 @@ void test_in(Shclient &shs, bool &main_loop)
     {
         shs.requestAllDevicesState();
     }
+    else if (input_buffer.substr(0, 2) == "up")
+    {
+        shs.update_cans();
+    }
     else if (input_buffer.substr(0, 6) == "get id")
     {
         shs.get_id();
@@ -123,6 +127,7 @@ void test_in(Shclient &shs, bool &main_loop)
             "  set state <ID>:<SID>       установить сост. устройству\n"
             "  get utc                    запрос даты с сервера\n"
             "  get id                     запрос id сервера\n"
+            "  up                         пинг устройств шины can\n"
             "  req all dev                запрос сост. всех устройств\n"
             "  h, help                    вывод этого сообщения\n"
             "  q, quit                    выход\n");

@@ -374,6 +374,22 @@ public:
         usleep(10000);
     }
 
+    void update_cans()
+    {
+        using namespace rapidxml;
+        xml_document<> doc;
+        doc.parse<0>(shCmdXml);
+        xml_node<>* decl = doc.allocate_node(node_type::node_declaration);
+        decl->append_attribute(doc.allocate_attribute("version", "1.0"));
+        decl->append_attribute(doc.allocate_attribute("encoding", "UTF-8"));
+        doc.prepend_node(decl);
+        doc.first_node("smart-house-commands")->append_node(doc.allocate_node(node_type::node_element, "update-cans"));        
+        std::stringstream ssxml;
+        ssxml << doc;
+        sendXmlToServer(ssxml.str());
+        usleep(10000);
+    }
+
     // Инициализация
     // подключение к серверу, авторизация по ключу, получение логики
     bool init()
@@ -471,6 +487,12 @@ public:
             memcpy(&srvid, srv_id.data(), 2);
             srv_id.clear(); srv_id = "ID сервера: ";
             logger.log(INFO, srv_id+std::to_string(srvid));
+        }
+        else if (shHead == "caninf")
+        {
+            std::string can_info = fread(length - 6);
+            can_info.insert(0, "Коды статусов CAN модулей:\n");
+            logger.log(INFO, can_info);
         }
         else
         {
