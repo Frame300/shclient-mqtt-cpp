@@ -17,7 +17,7 @@
 #include "Shclient.hpp"
 #include "logger.h"
 
-const std::string DFLT_SERVER_URI("89.17.55.74:36583");
+const std::string DFLT_SERVER_URI("192.168.1.125:1883");
 const std::string CLIENT_ID("shc-mqtt-cpp");
 const std::string TOPIC("cuarm/discovery/#");
 const std::string SH_PORT = "22522";
