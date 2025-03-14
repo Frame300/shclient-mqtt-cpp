@@ -44,7 +44,7 @@ private:
     std::string logicXml;
     std::vector<u_char> buffer;
     std::map<std::string, std::map<std::string, std::string>> Items;
-    std::vector<std::function<void(Shclient&, std::string, std::string)>> handlers;
+    std::vector<std::function<void(Shclient&, mqtt::async_client&, std::string, std::string)>> handlers;
     std::thread listener_thread;
     bool listener_running;
     fd_set read_fd;
@@ -57,7 +57,7 @@ private:
     {
         for (auto &func : handlers)
         {
-            func(*this, item, state);
+            func(*this, *mqttc, item, state);
         }
     }
 
@@ -246,16 +246,6 @@ private:
         return std::string(buffer.begin(), buffer.end());
     }
 
-    void sendXmlToServer(std::string data)
-    {
-        n = 0;
-        size_t msg_len = data.size();
-        send(tcp_sock_fd, &msg_len, 4, 0);
-        n = send(tcp_sock_fd, data.data(), msg_len, 0);
-        if (n < 0)
-            throw std::runtime_error("Writing to socket error in send xml data");
-    }
-
     struct UnpackDataExtended
     {
         u_int16_t sender_id;
@@ -293,6 +283,7 @@ public:
     #include "devicefactory.hpp"
     Logger logger = Logger("shclient.log");
     Factory* devfactory;
+    mqtt::async_client* mqttc;
 
     Shclient(const std::string &host, const std::string &port, const std::string &key, LogLevel logLevel = DEBUG)
     {
@@ -309,8 +300,18 @@ public:
         close_connection();
     }
 
+    void sendXmlToServer(std::string data)
+    {
+        n = 0;
+        size_t msg_len = data.size();
+        send(tcp_sock_fd, &msg_len, 4, 0);
+        n = send(tcp_sock_fd, data.data(), msg_len, 0);
+        if (n < 0)
+            throw std::runtime_error("Writing to socket error in send xml data");
+    }
+
 // TEST
-    void set_item(std::string xml = "")
+    void set_item(std::string xml)
     {
         if (xml.empty()) {
             xml = "<?xml version=\"1.0\" endcoding=\"UTF-8\"?>\n<smart-house-commands>\n";
@@ -781,7 +782,11 @@ public:
     //     полученный статус: <8и битный массив>
     void registerHandler(auto &func)
     {
-        handlers.emplace_back(std::bind(func, std::placeholders::_1, std::placeholders::_2, std::placeholders::_3));
+        handlers.emplace_back(std::bind(func, std::placeholders::_1, std::placeholders::_2, std::placeholders::_3, std::placeholders::_4));
     }
 
+    void set_mqttc(mqtt::async_client& mqttc_)
+    {
+        mqttc = &mqttc_;
+    }
 };
