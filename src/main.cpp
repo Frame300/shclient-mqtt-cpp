@@ -387,16 +387,16 @@ int main(int argc, char* argv[])
     // When completed, the callback will subscribe to topic.
 
     try {
-        std::cout << "Connecting to the MQTT server '" << serverURI << "'..." << std::endl;
+        cout << "Connecting to the MQTT server '" << serverURI << "'..." << endl;
         cli.connect(connOpts, nullptr, cb);
     }
     catch (const mqtt::exception& exc) {
-        std::cerr << "\nERROR: Unable to connect to MQTT server: '" << serverURI << "'" << exc
-                << std::endl;
+        cerr << "\nERROR: Unable to connect to MQTT server: '" << serverURI << "'" << exc
+                << endl;
         return 1;
     }
 
-    std::cout << "SmartHouse server '" << sh_addr << ":" << sh_port << std::endl;
+    cout << "SmartHouse server '" << sh_addr << ":" << sh_port << endl;
     shs.init();
     shs.startLister();
 
@@ -413,7 +413,7 @@ int main(int argc, char* argv[])
             if (LOGGER.input_buffer.length())
             {
                 LOGGER.input_buffer.pop_back();
-                std::cout << "\b\b\b   \b\b\b";
+                cout << "\b\b\b   \b\b\b";
             }
             break;
         default:
@@ -424,15 +424,16 @@ int main(int argc, char* argv[])
     // Disconnect
 
     try {
-        std::cout << "\nDisconnecting from the MQTT server..." << std::flush;
+        cout << endl;
+        cout << "Disconnecting from the MQTT server...";
         cli.disconnect()->wait();
-        std::cout << "OK" << std::endl;
-        std::cout << "\nDisconnecting from the SH server..." << std::flush;
+        cout << "OK" << endl;
+        cout << "Disconnecting from the SH server...";
         shs.close_connection();
-        std::cout << "OK" << std::endl;
+        cout << "OK" << endl;
     }
     catch (const mqtt::exception& exc) {
-        std::cerr << exc << std::endl;
+        cerr << exc << endl;
         return 1;
     }
 
