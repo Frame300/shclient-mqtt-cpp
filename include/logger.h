@@ -1,3 +1,4 @@
+#pragma once
 #include <ctime>
 #include <fstream>
 #include <iostream>
@@ -11,6 +12,7 @@ enum LogLevel { DEBUG, INFO, WARNING, ERROR, CRITICAL };
 
 class Logger {
 public:
+    string input_buffer = "";
     LogLevel Level = DEBUG;
     size_t maxFileSize = 1024*1024; // Максимальный размер файла лога (1 MB)
     size_t maxFiles = 5; // Максимальное количество файлов лога
@@ -59,7 +61,8 @@ public:
                  << endl;
 
         // Output to console
-        cout << logEntry.str();
+        // cout << logEntry.str();
+        to_console(logEntry.str());
 
         // Output to log file
         if (logFile.is_open()) {
@@ -71,6 +74,18 @@ public:
                 if (logFile.tellp() >= maxFileSize) rotateLogFiles();
             }
         }
+    }
+
+    void to_console(string logLine)
+    {
+        // Очищаем текущую строку ввода (Переводим "каретку" в начало, заполняем пробелами и снова переводим в начало)
+        cout << "\r" << string(input_buffer.length(), ' ') << "\r";
+
+        cout << logLine;
+
+        // Восстанавливаем ввод пользователя
+        cout << "> " << input_buffer;
+        cout.flush();
     }
 
 private:

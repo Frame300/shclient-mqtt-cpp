@@ -91,36 +91,49 @@ private:
         }
     }
 
-    void parceItems(string xmlData)
+    void parceItems()
     {
-        rapidxml::xml_document<> doc;
-        doc.parse<0>(xmlData);
-        for (auto &child : doc.first_node()->children())
+        try
         {
-            if (child.name() == "item")
-            {
-                map<string, string> item_attrs;
-                string addr;
-                for (auto &attr : child.attributes())
-                {
-                    if (attr.name() == "addr")
-                    {
-                        addr = attr.value();
-                        continue;
-                    }
-                    item_attrs.insert_or_assign(string(attr.name()), string(attr.value()));
-                }
-                if (!item_attrs.contains("State"))
-                {
-                    item_attrs.insert_or_assign(string("State"), string("???"));
-                }
-                Items.insert_or_assign(string(addr), map<string, string>(item_attrs));
-            }
-            else if (child.name() == "area")
-            {
-                _parceItems(child);
-            }
+            devfactory->load_from_xml(logicXml);
         }
+        catch(const std::exception& e)
+        {
+            std::string err_str("Ошибка парсинга файла логики: ");
+            err_str += e.what();
+            logger->log(ERROR, err_str);
+            sleep(3);
+            get_shc();
+        }
+
+        // rapidxml::xml_document<> doc;
+        // doc.parse<0>(xmlData);
+        // for (auto &child : doc.first_node()->children())
+        // {
+        //     if (child.name() == "item")
+        //     {
+        //         map<string, string> item_attrs;
+        //         string addr;
+        //         for (auto &attr : child.attributes())
+        //         {
+        //             if (attr.name() == "addr")
+        //             {
+        //                 addr = attr.value();
+        //                 continue;
+        //             }
+        //             item_attrs.insert_or_assign(string(attr.name()), string(attr.value()));
+        //         }
+        //         if (!item_attrs.contains("State"))
+        //         {
+        //             item_attrs.insert_or_assign(string("State"), string("???"));
+        //         }
+        //         Items.insert_or_assign(string(addr), map<string, string>(item_attrs));
+        //     }
+        //     else if (child.name() == "area")
+        //     {
+        //         _parceItems(child);
+        //     }
+        // }
     }
 
     void handleErrors()
@@ -158,25 +171,25 @@ private:
         tcp_sock_fd = socket(AF_INET, SOCK_STREAM, 0);
         if (tcp_sock_fd < 0)
         {
-            logger.log(ERROR, "Ошибка создания сокета");
+            logger->log(ERROR, "Ошибка создания сокета");
             return false;
         }
         server_addr.sin_family = AF_INET;
         server_addr.sin_port = htons(port);
         if (inet_pton(AF_INET, host.c_str(), &server_addr.sin_addr) <= 0)
         {
-            logger.log(ERROR, "Неверный IP-адрес");
+            logger->log(ERROR, "Неверный IP-адрес");
             return false;
         }
         if (connect(tcp_sock_fd, (struct sockaddr *)&server_addr, sizeof(server_addr)) < 0)
         {
-            logger.log(ERROR, "Ошибка подключения");
+            logger->log(ERROR, "Ошибка подключения");
             return false;
         }
         char c_port[6];
         snprintf(c_port, sizeof(c_port), "%d", port);
         std::string mess = "Подключено к " + host + ":" + c_port;
-        logger.log(INFO, mess);
+        logger->log(INFO, mess);
         return true;
     }
 
@@ -208,12 +221,12 @@ private:
         {
             data = "messag OS: Linux 12.3. Build: Mar 05 2025 12:34:23. Messages mask: 0F0F0F0F. Conn mode: 0x1034. ";
             sendXmlToServer(data);
-            logger.log(INFO, "Данные авторизации отправлены на сервер");
+            logger->log(INFO, "Данные авторизации отправлены на сервер");
             return true;
         }
         else
         {
-            logger.log(ERROR, "Ошибка отправки данных авторизации на сервер");
+            logger->log(ERROR, "Ошибка отправки данных авторизации на сервер");
             return false;
         }
     }
@@ -281,13 +294,13 @@ private:
 
 public:
     #include "devicefactory.hpp"
-    Logger logger = Logger("shclient.log");
+    Logger* logger;
     Factory* devfactory;
     mqtt::async_client* mqttc;
 
-    Shclient(const std::string &host, const std::string &port, const std::string &key, LogLevel logLevel = DEBUG)
+    Shclient(const std::string &host, const std::string &port, const std::string &key, Logger& logger)
     {
-        logger.setLevel(logLevel);
+        this->logger = &logger;
         this->devfactory = new Factory(*this);
         this->host = host;
         this->port = atoi(port.c_str());
@@ -311,7 +324,7 @@ public:
     }
 
 // TEST
-    void set_item(std::string xml)
+    void set_item(std::string xml="")
     {
         if (xml.empty()) {
             xml = "<?xml version=\"1.0\" endcoding=\"UTF-8\"?>\n<smart-house-commands>\n";
@@ -438,8 +451,7 @@ public:
             {
                 int real_size = logicXml.size() - (logicXml.size() - logicXml.find(shl_end));
                 logicXml.resize(real_size + shl_end.size());
-                devfactory->load_from_xml(logicXml);
-                parceItems(logicXml);
+                parceItems();
                 if (!logicXml.empty() && saveXmlLogic)
                 {
                     std::ofstream ofs(xmlFilePath);
@@ -450,28 +462,28 @@ public:
                     }
                 }
     
-                logger.log(INFO,    "Server recieved logicXml, FileSize: " + to_string(receivedFileSize) +
+                logger->log(INFO,    "Server recieved logicXml, FileSize: " + to_string(receivedFileSize) +
                                     ", CRC32: " + to_string(crc) + 
                                     ", initClientID: " + to_string(initClientID));
             }
             catch(const std::exception& e)
             {
-                std::string err_str("Ошибка парсинга файла логики: ");
+                std::string err_str("Ошибка чтения файла логики: ");
                 err_str += e.what();
-                logger.log(ERROR, err_str);
+                logger->log(ERROR, err_str);
                 usleep(100000);
                 get_shc();
             }
         }
         else if (shHead == "ping  ")
         {
-            logger.log(INFO, "Пинг от сервера");
+            logger->log(INFO, "Пинг от сервера");
         }
         else if (shHead == "messag")
         {
             std::string message = fread(length - 6);
             message.insert(0, "Принято сообщение от сервера: ");
-            logger.log(INFO, message);
+            logger->log(INFO, message);
         }
         else if (shHead == "utcnow")
         {
@@ -479,7 +491,7 @@ public:
             time_t utcnow = 0;
             memcpy(&utcnow, srv_utc.data(), 4);
             srv_utc.clear(); srv_utc = "Дата на сервере: ";
-            logger.log(INFO, srv_utc+std::ctime(&utcnow));
+            logger->log(INFO, srv_utc+std::ctime(&utcnow));
         }
         else if (shHead == "srv-id")
         {
@@ -487,19 +499,19 @@ public:
             uint16_t srvid = 0;
             memcpy(&srvid, srv_id.data(), 2);
             srv_id.clear(); srv_id = "ID сервера: ";
-            logger.log(INFO, srv_id+std::to_string(srvid));
+            logger->log(INFO, srv_id+std::to_string(srvid));
         }
         else if (shHead == "caninf")
         {
             std::string can_info = fread(length - 6);
             can_info.insert(0, "Коды статусов CAN модулей:\n");
-            logger.log(INFO, can_info);
+            logger->log(INFO, can_info);
         }
         else
         {
             std::string unknown = fread(length - 6);
             shHead.insert(0, "Принято сообщение с неизвестным заголовком: ");
-            logger.log(INFO, shHead);
+            logger->log(INFO, shHead);
             for (auto it: unknown)
             {
                 printf(" 0x%02x", it);
@@ -510,7 +522,7 @@ public:
     void readDevState(UnpackDataExtended &dataPacket)
     {
         std::string IdSid;
-        logger.log(DEBUG, "Device event data recieved. sender_id: " + std::to_string(dataPacket.sender_id) +
+        logger->log(DEBUG, "Device event data recieved. sender_id: " + std::to_string(dataPacket.sender_id) +
                                 ", dest_id: " + std::to_string(dataPacket.dest_id) +
                                 ", pd: " + std::to_string(dataPacket.pd) +
                                 ", transid: " + std::to_string(dataPacket.transid) +
@@ -543,13 +555,13 @@ public:
                 }
                 if (dataPacket.length == 1)
                 {
-                    logger.log(DEBUG, IdSid + " " + Items[IdSid]["type"] + " " + Items[IdSid]["name"] + " State: " + std::to_string(line[0]));
+                    logger->log(DEBUG, IdSid + " " + Items[IdSid]["type"] + " " + Items[IdSid]["name"] + " State: " + std::to_string(line[0]));
                 }
                 else if (dataPacket.length == 2)
                 {
                     if (Items[IdSid]["type"] == "dimer-lamp")
                     {
-                        logger.log(DEBUG, IdSid + " " + Items[IdSid]["type"] + " Power: " + (std::to_string(line[0])) + " Brightness: " + (std::to_string((int)round(static_cast<double>(line[1]) / 2.5))));
+                        logger->log(DEBUG, IdSid + " " + Items[IdSid]["type"] + " Power: " + (std::to_string(line[0])) + " Brightness: " + (std::to_string((int)round(static_cast<double>(line[1]) / 2.5))));
                     }
                     else
                     {
@@ -564,14 +576,14 @@ public:
                         {
                             processedValue = round((static_cast<double>(value) / 256.0) * 100) / 100.0;
                         }
-                        logger.log(DEBUG, IdSid + " " + Items[IdSid]["type"] + " Value: " + (std::to_string(processedValue)));
+                        logger->log(DEBUG, IdSid + " " + Items[IdSid]["type"] + " Value: " + (std::to_string(processedValue)));
                     }
                 }
                 else if (dataPacket.length > 2)
                 {
                     if (Items[IdSid]["type"] == "valve-heating")
                     {
-                        logger.log(DEBUG, IdSid + " " + Items[IdSid]["type"] + " State: " + std::string(std::to_string((int)line[0])) + " Mode: " + (Items[IdSid].contains("automation") ? Items[IdSid]["automation"] : "Manual"));
+                        logger->log(DEBUG, IdSid + " " + Items[IdSid]["type"] + " State: " + std::string(std::to_string((int)line[0])) + " Mode: " + (Items[IdSid].contains("automation") ? Items[IdSid]["automation"] : "Manual"));
                     }
                     else
                     {
@@ -580,7 +592,7 @@ public:
                         {
                             s_data[i] = line[i];
                         }
-                        logger.log(DEBUG, IdSid + " " + Items[IdSid]["type"] + " Value: " + std::string(s_data));
+                        logger->log(DEBUG, IdSid + " " + Items[IdSid]["type"] + " Value: " + std::string(s_data));
                     }
                 }
                 sendDataToHandlers(IdSid, line);
@@ -602,13 +614,13 @@ public:
                     Items[IdSid]["State"] = tmpdata;
                     if (ucanData.length == 1)
                     {
-                        logger.log(DEBUG, IdSid + " " + Items[IdSid]["type"] + " State: " + std::to_string(tmpdata[0]));
+                        logger->log(DEBUG, IdSid + " " + Items[IdSid]["type"] + " State: " + std::to_string(tmpdata[0]));
                     }
                     else if (ucanData.length == 2)
                     {
                         if (Items[IdSid]["type"] == "dimer-lamp")
                         {
-                            logger.log(DEBUG, IdSid + " " + Items[IdSid]["type"] + " Power: " + (std::to_string(tmpdata[0])) + " Brightness: " + (std::to_string((int)round(static_cast<double>(tmpdata[1]) / 2.5))));
+                            logger->log(DEBUG, IdSid + " " + Items[IdSid]["type"] + " Power: " + (std::to_string(tmpdata[0])) + " Brightness: " + (std::to_string((int)round(static_cast<double>(tmpdata[1]) / 2.5))));
                         }
                         else
                         {
@@ -623,14 +635,14 @@ public:
                                 processedValue = round((static_cast<double>(value) / 256.0) * 100) / 100.0;
                             }
 
-                            logger.log(DEBUG, IdSid + " " + Items[IdSid]["type"] + " Value: " + (std::to_string(processedValue)));
+                            logger->log(DEBUG, IdSid + " " + Items[IdSid]["type"] + " Value: " + (std::to_string(processedValue)));
                         }
                     }
                     else if (ucanData.length > 2)
                     {
                         if (Items[IdSid]["type"] == "valve-heating")
                         {
-                            logger.log(DEBUG, IdSid + " " + Items[IdSid]["type"] + " State: " + std::string(std::to_string((int)tmpdata[0])) + " Mode: " + (Items[IdSid].contains("automation") ? Items[IdSid]["automation"] : "Manual"));
+                            logger->log(DEBUG, IdSid + " " + Items[IdSid]["type"] + " State: " + std::string(std::to_string((int)tmpdata[0])) + " Mode: " + (Items[IdSid].contains("automation") ? Items[IdSid]["automation"] : "Manual"));
                         }
                         else
                         {
@@ -639,7 +651,7 @@ public:
                             {
                                 s_data[i] = tmpdata[i];
                             }
-                            logger.log(DEBUG, IdSid + " " + Items[IdSid]["type"] + " Value: " + std::string(s_data));
+                            logger->log(DEBUG, IdSid + " " + Items[IdSid]["type"] + " Value: " + std::string(s_data));
                         }
                     }
                     std::this_thread::sleep_for(std::chrono::milliseconds(5));
@@ -710,7 +722,7 @@ public:
         head.clientID = (uint16_t)initClientID;
         head.pd = (uint8_t)PD_REQUEST_ALL_DEVICES;
         send(tcp_sock_fd, reinterpret_cast<char*>(&head), sizeof(head), 0);
-        logger.log(WARNING, "Requesting all devices states");
+        logger->log(WARNING, "Requesting all devices states");
     }
 
     // Асинхронная отправка данных
@@ -759,12 +771,12 @@ public:
 // DEBUG
 
         if (n <= 0) {
-            logger.log(INFO, "Writing to socket error");
+            logger->log(INFO, "Writing to socket error");
             return false;
         }
         else
         {
-            logger.log(INFO, "Writing to socket success");
+            logger->log(INFO, "Writing to socket success");
             return true;
         }
     }

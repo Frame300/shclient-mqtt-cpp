@@ -12,14 +12,22 @@
 #include <sys/types.h>
 #include <nlohmann/json.hpp>
 
-
 #include "mqtt/async_client.h"
 #include "devices.hpp"
 #include "Shclient.hpp"
+#include "logger.h"
 
-const std::string DFLT_SERVER_URI("mqtt://89.17.55.74:36583");
+const std::string DFLT_SERVER_URI("89.17.55.74:36583");
 const std::string CLIENT_ID("shc-mqtt-cpp");
 const std::string TOPIC("cuarm/discovery/#");
+const std::string SH_PORT = "22522";
+const std::string SH_ADDR = "192.168.1.125";
+const std::string SH_KEY = "1234567890123456";
+
+Logger LOGGER = Logger("shc-mqtt.log");
+const int ENTER_KEY_CODE = 10;
+const int BACKSPACE_KEY_CODE = 127;
+bool loop = true;
 
 const int QOS = 1;
 const int N_RETRY_ATTEMPTS = 5;
@@ -46,37 +54,132 @@ vector<string> customSplit(string str, char* separator) {
     return vector<string>(strings.begin(), strings.end());
 }
 
-// void srv_msg(Shclient& shs, mqtt::async_client& mqttc, string item, string state)
-// {
-//     try
-//     {
-//         std::unique_ptr<Shclient::Device>* dev = shs.devfactory->get_device(item);
-//         if (dev) {
-//             Shclient::Device* device = dev->get();
+void p_exit(int s)
+{
+    printf("Caught signal %d\n", s);
+    loop = false;
+}
 
-//             stringstream topic;
-//             topic << "mimismart/" << device->id
-//             << "/" << device->sid << "/state";
+char getChar()
+{
+    struct termios oldt, newt;
+    char ch;
+    tcgetattr(STDIN_FILENO, &oldt); // Получаем текущие настройки терминала
+    newt = oldt;
+    newt.c_lflag &= ~(ICANON); // Выключаем канонический режим для перехвата всех нажатий до нажатия ENTER
+    tcsetattr(STDIN_FILENO, TCSANOW, &newt);
 
-//             stringstream payload;
-//             for (u_char c_state : state)
-//             {
-//                 payload << hex << (int)c_state << " ";
-//             }
+    ch = getchar(); // Читаем один символ
+    
+    tcsetattr(STDIN_FILENO, TCSANOW, &oldt); // Восстанавливаем настройки
+    return ch;
+}
 
-//             mqtt::message_ptr pubmsg = mqtt::make_message(topic.str(), payload.str());
-//             pubmsg->set_qos(QOS);
-//             mqttc.publish(pubmsg)->wait_for(TIMEOUT);
-//             shs.logger.log(INFO, "Send msg to MQTT. Topic: '"+topic.str()+"' Payload: '"+payload.str()+"'");
-//         } else {
-//             shs.logger.log(WARNING, "Device '"+item+"'  not found in logic.");
-//         }
-//     }
-//     catch (const exception &e)
-//     {
-//         cerr << e.what() << '\n';
-//     }
-// }
+void test_out(Shclient &shs, string item, string state)
+{
+    try
+    {
+        stringstream mess;
+
+        // Очищаем текущую строку ввода (Переводим "каретку" в начало, заполняем пробелами и снова переводим в начало)
+        cout << "\r" << string(LOGGER.input_buffer.length(), ' ') << "\r";
+
+        // Выводим номер и информацию устройства приславшего собитие
+        // mess << "От сервера принят статус устройства " << item.c_str() << ":\t";
+        // mess << "Type: " << shs.devfactory.get_device(item)->get()->type << ":\t";
+        for (u_char c_state : state)
+        {
+            mess << hex << (int)c_state << " ";
+        }
+        // LOGGER.log(WARNING, mess.str());
+
+        // Восстанавливаем ввод пользователя
+        cout << "> " << LOGGER.input_buffer;
+        cout.flush();
+    }
+    catch (const exception &e)
+    {
+        cerr << e.what() << '\n';
+    }
+}
+
+void test_in(Shclient &shs, bool &main_loop)
+{
+    if (LOGGER.input_buffer == "quit" || LOGGER.input_buffer == "q")
+    {
+        main_loop = false;
+        shs.close_connection();
+    }
+    else if (LOGGER.input_buffer.substr(0, 11) == "req all dev")
+    {
+        shs.requestAllDevicesState();
+    }
+    else if (LOGGER.input_buffer.substr(0, 2) == "up")
+    {
+        shs.update_cans();
+    }
+    else if (LOGGER.input_buffer.substr(0, 6) == "get id")
+    {
+        shs.get_id();
+    }
+    else if (LOGGER.input_buffer.substr(0, 7) == "get utc")
+    {
+        shs.get_utc();
+    }
+    else if (LOGGER.input_buffer.substr(0, 8) == "set item")
+    {
+        shs.set_item();
+    }
+    else if (LOGGER.input_buffer.substr(0, 9) == "set state")
+    {
+        string str = LOGGER.input_buffer.substr(10, -1);
+        char sepSp[] = " ";
+        char sepDp[] = ":";
+        vector<string> Strings = customSplit(str, sepSp);
+        vector<string> AddrStr = customSplit(Strings[0], sepDp);
+        int ID = atoi(AddrStr[0].c_str());
+        int SID = atoi(AddrStr[1].c_str());
+        vector<u_char> state;
+        for (vector<string>::iterator v_it = Strings.begin()+1; v_it != Strings.end(); ++v_it)
+        {
+             state.push_back(atoi((*v_it).c_str()));
+        }
+        // shs.set_state(ID, SID, state);
+        auto dev_point = shs.devfactory->get_device(Strings[0]);
+        if (dev_point) dev_point->get()->set_state_to_srv(state);
+        else LOGGER.log(WARNING, "Устройство не найдено");
+    }
+    else
+    {
+        printf("Использование\n"
+            "  > комманда [опции]\n\n"
+            "Комманда <опции>:\n"
+            "  set state <ID>:<SID>       установить сост. устройству\n"
+            "  get utc                    запрос даты с сервера\n"
+            "  get id                     запрос id сервера\n"
+            "  up                         пинг устройств шины can\n"
+            "  req all dev                запрос сост. всех устройств\n"
+            "  h, help                    вывод этого сообщения\n"
+            "  q, quit                    выход\n");
+    }
+    LOGGER.input_buffer.clear();
+    cout << "> ";
+}
+
+char* getCmdOption(char ** begin, char ** end, const std::string & option)
+{
+    char ** itr = std::find(begin, end, option);
+    if (itr != end && ++itr != end)
+    {
+        return *itr;
+    }
+    return 0;
+}
+
+bool cmdOptionExists(char** begin, char** end, const std::string& option)
+{
+    return std::find(begin, end, option) != end;
+}
 
 class action_listener : public virtual mqtt::iaction_listener
 {
@@ -101,21 +204,11 @@ class action_listener : public virtual mqtt::iaction_listener
         std::cout << std::endl;
     }
 
-public:
+    public:
     action_listener(const std::string& name) : name_(name) {}
 };
 
-/////////////////////////////////////////////////////////////////////////////
-
-/**
-* Local callback & listener class for use with the client connection.
-* This is primarily intended to receive messages, but it will also monitor
-* the connection to the broker. If the connection is lost, it will attempt
-* to restore the connection and re-subscribe to the topic.
-*/
-class callback : public virtual mqtt::callback, public virtual mqtt::iaction_listener
-
-{
+class callback : public virtual mqtt::callback, public virtual mqtt::iaction_listener {
     // Counter for the number of connection retries
     int nretry_;
     // The MQTT client
@@ -147,7 +240,7 @@ class callback : public virtual mqtt::callback, public virtual mqtt::iaction_lis
     // Re-connection failure
     void on_failure(const mqtt::token& tok) override
     {
-        std::cout << "Connection attempt failed" << std::endl;
+        LOGGER.log(ERROR, "Connection attempt failed");
         if (++nretry_ > N_RETRY_ATTEMPTS)
             exit(1);
         reconnect();
@@ -188,7 +281,7 @@ class callback : public virtual mqtt::callback, public virtual mqtt::iaction_lis
         stringstream mess;
         mess << "Message arrived. Topic: '" << msg->get_topic()
             << "'Payload: '" << msg->to_string();
-        shs_.logger.log(INFO, mess.str());
+        LOGGER.log(INFO, mess.str());
         
         // const mqtt::properties& props = msg->get_properties();
         // if (size_t n = props.size(); n != 0) {
@@ -210,7 +303,8 @@ class callback : public virtual mqtt::callback, public virtual mqtt::iaction_lis
                     std::string mqtt_msg = msg->to_string();
                     if (mqtt_msg[0] > 57 && device->type == "valve-heating") {
                         Strings = customSplit(mqtt_msg, sepSp);
-                        dynamic_cast<Shclient::Heating*>(device)->set_auto_to_srv(Strings[0], atoi((Strings[1]).c_str()));
+                        dynamic_cast<Shclient::Heating*>(device)->
+                                set_auto_to_srv(Strings[0], Strings.size() > 1 ? atoi((Strings[1]).c_str()) : 0);
                     } else {
                         vector<u_char> state = {};
                         Strings = customSplit(mqtt_msg, sepSp);
@@ -222,11 +316,11 @@ class callback : public virtual mqtt::callback, public virtual mqtt::iaction_lis
                     }
                 }
             }
-            else shs_.logger.log(WARNING, "Устройство не найдено");
+            else LOGGER.log(WARNING, "Устройство не найдено");
         }
         catch (const exception &e)
         {
-            shs_.logger.log(ERROR, e.what());
+            LOGGER.log(ERROR, e.what());
         }
     
     }
@@ -242,18 +336,40 @@ public:
 };
 
 
+using namespace std;
+using json = nlohmann::json;
+
 int main(int argc, char* argv[])
 {
-    // A subscriber often wants the server to remember its messages when its
-    // disconnected. In that case, it needs a unique ClientID and a
-    // non-clean session.
+    if(cmdOptionExists(argv, argv+argc, "-h"))
+    {
+        cout << "-f <path_to_config_file>" << endl;
+    }
+    char * configFilePath = getCmdOption(argv, argv + argc, "-f");
+    if (!configFilePath)
+    {
+        cout << "No config specified" << endl;
+        return 0;
+    }
 
-    auto serverURI = (argc > 1) ? std::string{argv[1]} : DFLT_SERVER_URI;
-    string sh_port = "36525";
-    string sh_addr = "89.17.55.74";
-    string sh_key = "1234567890123456";
+    struct sigaction sigIntHandler;
+    sigIntHandler.sa_handler = p_exit;
+    sigemptyset(&sigIntHandler.sa_mask);
+    sigIntHandler.sa_flags = 0;
+    sigaction(SIGINT, &sigIntHandler, NULL);
 
-    Shclient shs(sh_addr, sh_port, sh_key, INFO);
+    LOGGER.setLevel(INFO);
+
+    ifstream f(configFilePath);
+    json data = json::parse(f);
+    
+    auto serverURI = "mqtt://"+(data.contains("mqtt_host") ? string(data["mqtt_host"]) : DFLT_SERVER_URI);
+    cout << "MQTT server: '" << serverURI << "'";
+    auto sh_addr = data.contains("ip20") ? string(data["ip20"]) : SH_ADDR;
+    auto sh_port = data.contains("port20") ? string(data["port20"]) : SH_PORT;
+    auto sh_key = data.contains("key20") ? string(data["key20"]) : SH_KEY;
+
+    Shclient shs(sh_addr, sh_port, sh_key, LOGGER);
     mqtt::async_client cli(serverURI, CLIENT_ID);
     shs.set_mqttc(cli);
 
@@ -271,7 +387,7 @@ int main(int argc, char* argv[])
     // When completed, the callback will subscribe to topic.
 
     try {
-        std::cout << "Connecting to the MQTT server '" << serverURI << "'..." << std::flush;
+        std::cout << "Connecting to the MQTT server '" << serverURI << "'..." << std::endl;
         cli.connect(connOpts, nullptr, cb);
     }
     catch (const mqtt::exception& exc) {
@@ -280,13 +396,30 @@ int main(int argc, char* argv[])
         return 1;
     }
 
-    std::cout << "shs.init() '" << sh_addr << ":" << sh_port << std::endl;
+    std::cout << "SmartHouse server '" << sh_addr << ":" << sh_port << std::endl;
     shs.init();
-    // shs.registerHandler(srv_msg);
     shs.startLister();
 
     // Just block till user tells us to quit.
-    while (std::tolower(std::cin.get()) != 'q');
+    while (loop)
+    {
+        char ch = getChar();
+        switch ((int)ch)
+        {
+        case ENTER_KEY_CODE:
+            test_in(shs, loop);
+            break;
+        case BACKSPACE_KEY_CODE:
+            if (LOGGER.input_buffer.length())
+            {
+                LOGGER.input_buffer.pop_back();
+                std::cout << "\b\b\b   \b\b\b";
+            }
+            break;
+        default:
+            LOGGER.input_buffer += ch;
+        }
+    }
 
     // Disconnect
 
@@ -294,7 +427,9 @@ int main(int argc, char* argv[])
         std::cout << "\nDisconnecting from the MQTT server..." << std::flush;
         cli.disconnect()->wait();
         std::cout << "OK" << std::endl;
+        std::cout << "\nDisconnecting from the SH server..." << std::flush;
         shs.close_connection();
+        std::cout << "OK" << std::endl;
     }
     catch (const mqtt::exception& exc) {
         std::cerr << exc << std::endl;

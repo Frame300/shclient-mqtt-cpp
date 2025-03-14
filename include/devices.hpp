@@ -19,7 +19,7 @@ class dev_action_listener : public virtual mqtt::iaction_listener
         mess << name_ << " failure";
         if (tok.get_message_id() != 0)
             mess << " for token: [" << tok.get_message_id() << "]" << std::endl;
-        shc->logger.log(INFO, mess.str());
+        shc->logger->log(INFO, mess.str());
     }
 
     void on_success(const mqtt::token& tok) override
@@ -31,7 +31,7 @@ class dev_action_listener : public virtual mqtt::iaction_listener
         auto top = tok.get_topics();
         if (top && !top->empty())
             mess << "\ttoken topic: '" << (*top)[0];
-        shc->logger.log(INFO, mess.str());
+        shc->logger->log(INFO, mess.str());
     }
 
 public:
@@ -99,7 +99,7 @@ class Device {
                 mqtt::message_ptr pubmsg = mqtt::make_message(state_topic, payload.str());
                 pubmsg->set_qos(qos);
                 shc->mqttc->publish(pubmsg);
-                shc->logger.log(INFO, "Send msg to MQTT. Topic: '"+state_topic+"' Payload: '"+payload.str()+"'");
+                shc->logger->log(INFO, "Recieved mqtt msg. Topic: '"+state_topic+"' Payload: '"+payload.str()+"'");
             }
             catch (const exception &e)
             {
@@ -142,7 +142,7 @@ class Heating : public Device {
             if (automation != "manual") {
                 xml_content.child("item").remove_attribute("automation");
                 automation = "manual";
-                shc->logger.log(INFO, "Send xml to server by set_state_to_srv");
+                shc->logger->log(INFO, "Send xml to server by set_state_to_srv");
                 send_xml_cmd();
                 set_auto();
             }
@@ -172,7 +172,7 @@ class Heating : public Device {
                     }
                 }
             }
-            shc->logger.log(INFO, "Send xml to server by set_auto_to_srv");
+            shc->logger->log(INFO, "Send xml to server by set_auto_to_srv");
             send_xml_cmd();
             set_auto();
         }
